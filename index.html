@@ -627,10 +627,10 @@ input[type=range]::-moz-range-thumb {
 
   <!-- Tab bar -->
   <div id="tab-bar">
-    <button class="tab-btn active" onclick="switchTab('draw')">Draw</button>
-    <button class="tab-btn" onclick="switchTab('polys')">Polygons <span class="tab-badge" id="poly-badge">0</span></button>
-    <button class="tab-btn" onclick="switchTab('export')">Import/Export</button>
-    <button class="tab-btn" onclick="switchTab('analysis')">Analysis</button>
+    <button class="tab-btn active" onclick="switchTab('draw', this)">Draw</button>
+    <button class="tab-btn" onclick="switchTab('polys', this)">Polygons <span class="tab-badge" id="poly-badge">0</span></button>
+    <button class="tab-btn" onclick="switchTab('export', this)">Import/Export</button>
+    <button class="tab-btn" onclick="switchTab('analysis', this)">Analysis</button>
   </div>
 
   <!-- Tab panes -->
@@ -753,6 +753,27 @@ input[type=range]::-moz-range-thumb {
         </div>
       </div>
 
+      <div class="field-group">
+        <div class="field-group-label">Preset polygons</div>
+        <div class="sl-wrap">
+          <div class="sl-head"><span>Preset source folder</span><span class="sl-val" id="presetCountLabel">0</span></div>
+          <div style="font-size:11px;line-height:1.7;color:var(--tx1);padding-top:2px;">
+            This loads files from <a href="https://github.com/honeyseltzer/h3polygen/tree/main/polygons" target="_blank" rel="noreferrer" style="color:var(--acc);text-decoration:none;">/polygons</a>.
+            Add a <span style="font-family:var(--mono);color:var(--tx0);">manifest.json</span> file in that folder listing your preset <span style="font-family:var(--mono);color:var(--tx0);">.zip</span> shapefiles or GeoJSON files.
+          </div>
+        </div>
+        <div class="sl-wrap" style="border-top:1px solid var(--line)">
+          <div class="sl-head"><span>Choose preset</span><span class="sl-val" id="presetStatusLabel">Idle</span></div>
+          <select id="presetPolygonSelect" class="flat-select">
+            <option value="">Loading presets…</option>
+          </select>
+          <div class="btn-row pad">
+            <button class="btn" onclick="refreshPresetPolygons()">Refresh</button>
+            <button class="btn go" onclick="loadSelectedPresetPolygon()">Load Preset</button>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /pane-export -->
 
     <!-- ── ANALYSIS TAB ──────────────────────────────────────────────────── -->
@@ -802,11 +823,11 @@ input[type=range]::-moz-range-thumb {
 
 <script>
 // ── TAB SWITCHING ─────────────────────────────────────────────────────────
-function switchTab(id) {
+function switchTab(id, btn) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('pane-' + id).classList.add('active');
-  event.currentTarget.classList.add('active');
+  (btn || window.event?.currentTarget)?.classList?.add('active');
 }
 
 // ── STATUS PILL ───────────────────────────────────────────────────────────
@@ -882,6 +903,7 @@ function initApp() {
   const exportSelectedPolys = new Set(); // indices checked for selective export
   let exportScope = 'all'; // 'all' | 'selected'
   let openDropdownIdx = null; // which poly dropdown is open
+  let presetPolygons = [];
 
   function showStatus(msg, type='') {
     const el = document.getElementById('draw-notice');
@@ -945,7 +967,7 @@ function initApp() {
     return ring;
   }
   function buildCleanTurfPolygonFromFeature(feature) {
-    if(!feature?.geometry?.type==='Polygon') return null;
+    if(feature?.geometry?.type!=='Polygon') return null;
     const rings=feature.geometry.coordinates.map(r=>ensureClosedRing(r));
     let poly; try{ poly=turf.polygon(rings); }catch{ return null; }
     try{
@@ -1041,6 +1063,7 @@ function initApp() {
       const res=p.result?.maxRes!=null?`R${p.result.maxRes}`:'—';
 
       const item=document.createElement('div');
+      item.dataset.idx = String(i);
       item.className='poly-item'+(isActive?' active':'')+(isSel&&!isActive?' selected':'')+(p.hexed?' hexed':'');
       item.innerHTML=`
         <div class="poly-status-dot"></div>
@@ -1106,7 +1129,7 @@ function initApp() {
 
   // H3 CORE
   function featureToCellLoops(feature) {
-    if(!feature?.geometry?.type==='Polygon') return null;
+    if(feature?.geometry?.type!=='Polygon') return null;
     return feature.geometry.coordinates.map(ring=>ensureClosedRing(ring));
   }
   function computeAtRes(feature,maxRes) {
@@ -1400,24 +1423,117 @@ function initApp() {
     else { selectSinglePoly(idx); }
   }
 
+  function normalizePresetManifest(manifest) {
+    const items = Array.isArray(manifest) ? manifest : (manifest?.polygons || manifest?.items || []);
+    return items.map((item, idx) => {
+      if (typeof item === 'string') {
+        const file = item.trim();
+        const name = file.split('/').pop().replace(/\.(zip|json|geojson)$/i, '');
+        return { name, file, description: '' };
+      }
+      const file = (item?.file || item?.url || item?.path || '').trim();
+      const name = (item?.name || item?.label || file.split('/').pop().replace(/\.(zip|json|geojson)$/i, '') || `Preset ${idx + 1}`).trim();
+      return { name, file, description: item?.description || '' };
+    }).filter(x => x.file);
+  }
+
+  function populatePresetSelect() {
+    const select = document.getElementById('presetPolygonSelect');
+    const countLabel = document.getElementById('presetCountLabel');
+    if (!select) return;
+    select.innerHTML = '';
+    if (!presetPolygons.length) {
+      select.innerHTML = '<option value="">No presets found</option>';
+      if (countLabel) countLabel.textContent = '0';
+      document.getElementById('presetStatusLabel').textContent = 'No manifest';
+      return;
+    }
+    presetPolygons.forEach((p, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = p.description ? `${p.name} — ${p.description}` : p.name;
+      select.appendChild(opt);
+    });
+    if (countLabel) countLabel.textContent = String(presetPolygons.length);
+    document.getElementById('presetStatusLabel').textContent = 'Ready';
+  }
+
+  async function refreshPresetPolygons(silent=false) {
+    const select = document.getElementById('presetPolygonSelect');
+    const status = document.getElementById('presetStatusLabel');
+    try {
+      status.textContent = 'Loading…';
+      const manifestUrl = `polygons/manifest.json?ts=${Date.now()}`;
+      const res = await fetch(manifestUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`manifest ${res.status}`);
+      const manifest = await res.json();
+      presetPolygons = normalizePresetManifest(manifest).map(p => ({
+        ...p,
+        file: p.file.startsWith('http') ? p.file : `polygons/${p.file.replace(/^\.\//, '')}`
+      }));
+      populatePresetSelect();
+      if (!silent) showStatus(`Loaded ${presetPolygons.length} preset polygon(s)`, presetPolygons.length ? 'ok' : 'warn');
+    } catch (e) {
+      presetPolygons = [];
+      populatePresetSelect();
+      if (!silent) showStatus('No /polygons/manifest.json found yet', 'warn');
+      dbg('warn', `Preset manifest not loaded: ${e.message}`);
+    }
+  }
+
+  async function importShapeFromArrayBuffer(buffer, sourceLabel, extHint='') {
+    let imported;
+    const ext = extHint.toLowerCase();
+    if (ext === 'json' || ext === 'geojson') {
+      imported = JSON.parse(new TextDecoder().decode(buffer));
+    } else {
+      imported = await shp(buffer);
+    }
+    const features = normalizeImportedToPolygonFeatures(imported);
+    if (!features.length) throw new Error('No polygon features found');
+    let count = 0;
+    for (let i = 0; i < features.length; i++) {
+      addPolyObject(features[i], { source: sourceLabel, name: `${sourceLabel} · ${i + 1}` });
+      count++;
+      await yieldToUI();
+    }
+    if (currentPolyIndex == null && polys.length) selectSinglePoly(0);
+    updateExportAvailability();
+    return count;
+  }
+
+  async function handleRemoteShapeLoad(url, sourceLabel) {
+    const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    return importShapeFromArrayBuffer(buf, sourceLabel, ext);
+  }
+
+  async function loadSelectedPresetPolygon() {
+    const sel = document.getElementById('presetPolygonSelect');
+    const idx = parseInt(sel.value, 10);
+    if (Number.isNaN(idx) || !presetPolygons[idx]) {
+      showStatus('Choose a preset polygon first', 'warn');
+      return;
+    }
+    const preset = presetPolygons[idx];
+    showStatus(`Loading preset ${preset.name}…`, 'info');
+    try {
+      const count = await handleRemoteShapeLoad(preset.file, preset.name);
+      showStatus(`Loaded preset ${preset.name} (${count} polygon(s))`, 'ok');
+    } catch (e) {
+      showStatus(`Preset load failed: ${e.message}`, 'error');
+    }
+  }
+
   // IMPORT
   async function handleShapeUpload(ev) {
     const file=ev.target.files?.[0]; ev.target.value=''; if(!file) return;
     showStatus(`Loading ${file.name}…`,'info');
     try{
-      let imported;
       const ext=(file.name.split('.').pop()||'').toLowerCase();
-      if(ext==='json'||ext==='geojson') imported=JSON.parse(await file.text());
-      else imported=await shp(await file.arrayBuffer());
-      const features=normalizeImportedToPolygonFeatures(imported);
-      if(!features.length) throw new Error('No polygon features found');
-      let count=0;
-      for(let i=0;i<features.length;i++){
-        addPolyObject(features[i],{source:'import',name:`${file.name.split('.')[0]} · ${i+1}`}); count++;
-        await yieldToUI();
-      }
-      if(currentPolyIndex==null&&polys.length) selectSinglePoly(0);
-      updateExportAvailability();
+      const count = await importShapeFromArrayBuffer(await file.arrayBuffer(), file.name.replace(/\.[^.]+$/, ''), ext);
       showStatus(`Imported ${count} polygon(s)`,'ok');
     }catch(e){ showStatus(`Import failed: ${e.message}`,'error'); }
   }
@@ -1429,7 +1545,7 @@ function initApp() {
     if(coords[0][0]!==coords[coords.length-1][0]||coords[0][1]!==coords[coords.length-1][1]) coords.push([...coords[0]]);
     const feature={type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[coords]}};
     const poly=addPolyObject(feature,{source:'draw',name:`Drawn #${polys.length}`});
-    if(poly) selectSinglePoly(poly.id-1);
+    if(poly) selectSinglePoly(polys.length-1);
   }
   function clearWorkingOverlays() { clearLayer(previewLayer); previewLayer=null; clearLayer(mouseLayer); mouseLayer=null; }
 
@@ -1538,11 +1654,12 @@ function initApp() {
   window.onParamChange=onParamChange; window.onSimplifyChange=onSimplifyChange;
   window.onExportModeChange=updateExportModeUI; window.onExportResChange=onExportResChange;
   window.onCellCapChange=onCellCapChange; window.exportH3GeoJSON=exportH3GeoJSON; window.autoFit=autoFit;
-  window.setExportScope=setExportScope;
+  window.setExportScope=setExportScope; window.refreshPresetPolygons=refreshPresetPolygons;
+  window.loadSelectedPresetPolygon=loadSelectedPresetPolygon;
 
   // INIT
   onCellCapChange(); onSimplifyChange(); updateExportModeUI(); onExportResChange(); updatePolyList();
-  onParamChange(); renderWholeMapMetrics();
+  onParamChange(); renderWholeMapMetrics(); refreshPresetPolygons(true);
   map.on('click',onMapClick);
   document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&isDrawing) finishDraw(); });
   setPill('Ready','');
