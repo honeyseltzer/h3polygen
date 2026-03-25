@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+<title>H3 Polygon Generator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ── RESET ───────────────────────────────────────────────────────────────── */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg0:      #0d0d0d;
+  --bg1:      #141414;
+  --bg2:      #1a1a1a;
+  --bg3:      #1f1f1f;
+  --bg4:      #252525;
+  --line:     #2a2a2a;
+  --line2:    #333333;
+  --tx0:      #e2e2e2;
+  --tx1:      #a0a0a0;
+  --tx2:      #5a5a5a;
+  --tx3:      #3a3a3a;
+  --acc:      #7c5cbf;   /* obsidian purple */
+  --acc-dim:  rgba(124,92,191,.14);
+  --acc-glow: rgba(124,92,191,.07);
+  --grn:      #4caf7d;
+  --red:      #d05c5c;
+  --amb:      #bf9540;
+  --blu:      #4a90c8;
+  --sans:     'Inter', system-ui, sans-serif;
+  --mono:     'IBM Plex Mono', 'Fira Code', monospace;
+  --r:        4px;
+  --fast:     0.13s ease;
+}
+
+body {
+  font-family: var(--sans);
+  font-size: 13px;
+  background: var(--bg0);
+  color: var(--tx0);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── MAP ─────────────────────────────────────────────────────────────────── */
+#map { flex:1; position:relative; z-index:1; }
+#map.draw-active,
+#map.draw-active .leaflet-interactive { cursor: crosshair !important; }
+
+/* ── PANEL ───────────────────────────────────────────────────────────────── */
+#panel {
+  width: 360px;
+  min-width: 360px;
+  background: var(--bg1);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+}
+
+/* ── HEADER ──────────────────────────────────────────────────────────────── */
+#hdr {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg0);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+#status-pill {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--line2);
+  color: var(--tx2);
+  letter-spacing: .3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--fast);
+}
+#status-pill.info  { border-color:var(--blu); color:var(--blu); }
+#status-pill.ok    { border-color:var(--grn); color:var(--grn); }
+#status-pill.warn  { border-color:var(--amb); color:var(--amb); }
+#status-pill.error { border-color:var(--red); color:var(--red); }
+
+/* ── TABS ────────────────────────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg0);
+  flex-shrink: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#tab-bar::-webkit-scrollbar { display:none; }
+
+.tab-btn {
+  flex: 1;
+  padding: 9px 4px 8px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tx2);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all var(--fast);
+  white-space: nowrap;
+  letter-spacing: .2px;
+  min-width: 52px;
+}
+.tab-btn:hover { color: var(--tx1); }
+.tab-btn.active {
+  color: var(--acc);
+  border-bottom-color: var(--acc);
+}
+.tab-btn .tab-badge {
+  display: inline-block;
+  background: var(--acc-dim);
+  color: var(--acc);
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+/* ── TAB PANES ───────────────────────────────────────────────────────────── */
+#tab-panes { flex:1; overflow:hidden; position:relative; }
+.tab-pane {
+  display: none;
+  position: absolute; inset: 0;
+  overflow-y: auto;
+  padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) transparent;
+  flex-direction: column;
+  gap: 16px;
+}
+.tab-pane::-webkit-scrollbar { width:4px; }
+.tab-pane::-webkit-scrollbar-thumb { background:var(--line2); border-radius:2px; }
+.tab-pane.active { display: flex; }
+
+/* ── FIELD GROUPS ────────────────────────────────────────────────────────── */
+.field-group {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: visible;
+}
+.field-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--tx2);
+  padding: 8px 12px 7px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg1);
+}
+
+/* ── BUTTONS ─────────────────────────────────────────────────────────────── */
+.btn-row { display:flex; gap:6px; padding:10px 12px 4px; }
+.btn-row:first-of-type { padding-top:12px; }
+.btn-row:last-of-type  { padding-bottom:12px; }
+.btn-row.pad { padding: 10px 12px; }
+
+.btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--bg3);
+  color: var(--tx1);
+  cursor: pointer;
+  transition: all var(--fast);
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--tx2); color: var(--tx0); background: var(--bg4); }
+.btn.active { border-color: var(--acc); background: var(--acc-dim); color: var(--acc); }
+.btn.go { border-color: var(--grn); color: var(--grn); background: rgba(76,175,125,.08); }
+.btn.go:hover { background: rgba(76,175,125,.15); }
+.btn.danger { border-color: var(--red); color: var(--red); background: rgba(208,92,92,.08); }
+.btn.danger:hover { background: rgba(208,92,92,.15); }
+.btn.on { border-color: var(--blu); color: var(--blu); background: rgba(74,144,200,.08); }
+.btn:disabled { opacity:.35; cursor:not-allowed; pointer-events:none; }
+.btn.full { flex: none; width: calc(100% - 24px); margin: 0 12px 12px; }
+
+/* ── SLIDERS ─────────────────────────────────────────────────────────────── */
+.sl-wrap { padding: 10px 12px 12px; }
+.sl-wrap + .sl-wrap { border-top: 1px solid var(--line); }
+.sl-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--tx1);
+  font-weight: 500;
+}
+.sl-val {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--acc);
+  font-weight: 500;
+}
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--line2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  background: var(--acc);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px var(--acc-dim);
+}
+input[type=range]::-moz-range-thumb {
+  width:14px; height:14px; background:var(--acc); border:none; border-radius:50%;
+}
+.sl-hint {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: var(--tx2);
+  margin-top: 5px;
+}
+
+/* ── CHECKBOX ────────────────────────────────────────────────────────────── */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--tx1);
+  cursor: pointer;
+  border-top: 1px solid var(--line);
+  user-select: none;
+}
+.check-row:hover { background: var(--bg3); }
+.check-row input[type=checkbox] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px; height: 14px;
+  background: var(--bg3);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  transition: all var(--fast);
+}
+.check-row input[type=checkbox]:checked {
+  background: var(--acc);
+  border-color: var(--acc);
+}
+.check-row input[type=checkbox]:checked::after {
+  content: '';
+  width: 8px; height: 8px;
+  background: white;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+
+/* ── SELECT ──────────────────────────────────────────────────────────────── */
+.flat-select {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  color: var(--tx0);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 7px 28px 7px 10px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%235a5a5a' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+.flat-select:hover { border-color: var(--tx2); }
+.sl-wrap .flat-select { margin-top: 2px; }
+
+/* ── POLYGON LIST ────────────────────────────────────────────────────────── */
+.poly-list {
+  display: flex;
+  flex-direction: column;
+}
+.poly-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background var(--fast);
+}
+.poly-item:last-child { border-bottom: none; }
+.poly-item:hover { background: var(--bg3); }
+.poly-item.active {
+  background: var(--acc-glow);
+  border-left: 2px solid var(--acc);
+  padding-left: 10px;
+}
+.poly-item.selected { background: rgba(76,175,125,.05); }
+.poly-status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--line2);
+}
+.poly-item.active   .poly-status-dot { background: var(--acc); }
+.poly-item.selected .poly-status-dot { background: var(--grn); }
+.poly-item.hexed    .poly-status-dot { background: var(--acc); }
+.poly-meta { flex:1; min-width:0; }
+.poly-name {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tx0);
+}
+.poly-sub {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--tx2);
+  margin-top: 2px;
+}
+.poly-del {
+  width: 22px; height: 22px;
+  background: transparent;
+  border: none;
+  color: var(--tx3);
+  cursor: pointer;
+  font-size: 14px;
+  display: grid; place-items: center;
+  border-radius: var(--r);
+  flex-shrink: 0;
+  transition: all var(--fast);
+  line-height: 1;
+}
+.poly-del:hover { background: rgba(208,92,92,.15); color: var(--red); }
+
+/* ── POLY ITEM ACTIONS ───────────────────────────────────────────────────── */
+.poly-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.poly-export-cb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px; height: 14px;
+  background: var(--bg3);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  transition: all var(--fast);
+}
+.poly-export-cb:checked {
+  background: var(--acc);
+  border-color: var(--acc);
+}
+.poly-export-cb:checked::after {
+  content: '';
+  width: 8px; height: 8px;
+  background: white;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+.poly-expand-btn {
+  width: 22px; height: 22px;
+  background: transparent;
+  border: none;
+  color: var(--tx3);
+  cursor: pointer;
+  font-size: 10px;
+  display: grid; place-items: center;
+  border-radius: var(--r);
+  flex-shrink: 0;
+  transition: all var(--fast);
+  line-height: 1;
+}
+.poly-expand-btn:hover { background: var(--bg4); color: var(--tx1); }
+.poly-expand-btn.open { color: var(--acc); background: var(--acc-dim); }
+
+/* ── POLY INLINE DROPDOWN ────────────────────────────────────────────────── */
+.poly-dropdown {
+  display: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg0);
+}
+.poly-dropdown.open { display: block; }
+.poly-dropdown .metric-grid {
+  border-top: 1px solid var(--line);
+}
+.poly-dropdown .metric-cell {
+  padding: 7px 10px;
+}
+.poly-dropdown .metric-cell:nth-last-child(1),
+.poly-dropdown .metric-cell:nth-last-child(2) { border-bottom: none; }
+
+/* ── EXPORT SCOPE TOGGLE ─────────────────────────────────────────────────── */
+.scope-toggle {
+  display: flex;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.scope-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg3);
+  border: none;
+  color: var(--tx2);
+  cursor: pointer;
+  transition: all var(--fast);
+  border-right: 1px solid var(--line2);
+  white-space: nowrap;
+}
+.scope-btn:last-child { border-right: none; }
+.scope-btn.active { background: var(--acc-dim); color: var(--acc); }
+.scope-btn:hover:not(.active) { color: var(--tx1); background: var(--bg4); }
+.scope-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--tx2);
+  padding: 6px 12px 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px solid var(--line);
+}
+.scope-count span { color: var(--acc); font-weight: 600; }
+
+/* ── METRICS ─────────────────────────────────────────────────────────────── */
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.metric-cell {
+  padding: 9px 12px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.metric-cell:nth-child(even) { border-right: none; }
+.metric-cell.span2 { grid-column: span 2; border-right: none; }
+.metric-cell:nth-last-child(1),
+.metric-cell:nth-last-child(2) { border-bottom: none; }
+.metric-cell.span2:last-child  { border-bottom: none; }
+.mk { font-size: 9.5px; color: var(--tx2); margin-bottom: 3px; font-weight: 500; text-transform: uppercase; letter-spacing: .5px; }
+.mv {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tx0);
+}
+.mv.ok   { color: var(--grn); }
+.mv.bad  { color: var(--red); }
+.mv.warn { color: var(--amb); }
+.mv.acc  { color: var(--acc); }
+
+/* ── RES BREAKDOWN ───────────────────────────────────────────────────────── */
+.res-rows { 
+  display:flex; 
+  flex-direction:column; 
+  gap:7px; 
+  padding: 12px; 
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) transparent;
+}
+.res-rows::-webkit-scrollbar { width:4px; }
+.res-rows::-webkit-scrollbar-thumb { background:var(--line2); border-radius:2px; }
+.res-row { display:flex; align-items:center; gap:8px; font-size:11px; }
+.res-dot { width:7px; height:7px; border-radius:1px; flex-shrink:0; }
+.res-label { color:var(--tx1); width:42px; font-size:10.5px; }
+.res-bar-bg { flex:1; height:4px; background:var(--line2); border-radius:2px; overflow:hidden; }
+.res-bar-fg { height:100%; border-radius:2px; }
+.res-num { font-family:var(--mono); font-size:9.5px; width:52px; text-align:right; color:var(--tx2); }
+
+/* ── STATUS / NOTICE ─────────────────────────────────────────────────────── */
+.notice {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+  color: var(--tx1);
+  border-left: 2px solid var(--line2);
+  background: transparent;
+}
+.notice.info  { border-color: var(--blu); color: var(--blu); }
+.notice.ok    { border-color: var(--grn); color: var(--grn); }
+.notice.warn  { border-color: var(--amb); color: var(--amb); }
+.notice.error { border-color: var(--red); color: var(--red); }
+
+#draw-notice { display:none; margin-top: 4px; }
+.field-group .notice { border-left-width: 0; border-top: 1px solid var(--line); }
+
+/* ── DEBUG ───────────────────────────────────────────────────────────────── */
+#debug-pane {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--tx2);
+  line-height: 1.7;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line2) transparent;
+}
+
+/* ── MAP OVERLAYS ────────────────────────────────────────────────────────── */
+#cursor-hint {
+  position: absolute;
+  top: 14px; left: 50%; transform: translateX(-50%);
+  background: rgba(13,13,13,.94);
+  border: 1px solid var(--acc);
+  padding: 5px 16px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--acc);
+  pointer-events: none;
+  z-index: 1000;
+  white-space: nowrap;
+  display: none;
+  letter-spacing: .3px;
+}
+
+#map-legend {
+  position: absolute;
+  bottom: 22px; left: 14px;
+  background: rgba(13,13,13,.9);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  font-size: 10px;
+  color: var(--tx1);
+  pointer-events: none;
+  z-index: 500;
+  min-width: 110px;
+  backdrop-filter: blur(4px);
+}
+.leg-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--tx0);
+  letter-spacing: .5px;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+.leg-row { display:flex; align-items:center; gap:7px; margin-bottom:3px; font-size:10px; }
+.leg-swatch { width:16px; height:5px; border-radius:1px; }
+.leg-sep { border-top: 1px solid var(--line); margin: 6px 0; }
+
+/* ── LEAFLET OVERRIDES ───────────────────────────────────────────────────── */
+.leaflet-control-attribution { font-size: 7px !important; opacity: .3 !important; }
+.leaflet-control-zoom a {
+  background: var(--bg1) !important;
+  color: var(--tx1) !important;
+  border: 1px solid var(--line2) !important;
+  font-family: var(--sans) !important;
+  font-size: 14px !important;
+}
+.leaflet-control-zoom a:hover { border-color: var(--acc) !important; color: var(--acc) !important; }
+</style>
+</head>
+<body>
+
+<!-- MAP -->
+<div id="map">
+  <div id="cursor-hint">Drawing active — double-click to close</div>
+  <div id="map-legend">
+    <div class="leg-title">Resolution</div>
+    <div id="leg-items"></div>
+    <div class="leg-sep"></div>
+    <div class="leg-row"><div style="width:16px;height:0;border-top:2px dashed #d05c5c"></div><span>Source</span></div>
+    <div class="leg-row"><div style="width:16px;height:0;border-top:2px solid #7c5cbf"></div><span>Selected</span></div>
+  </div>
+</div>
+
+<!-- PANEL -->
+<div id="panel">
+
+  <!-- Header -->
+  <div id="hdr">
+    <div id="status-pill">Ready</div>
+  </div>
+
+  <!-- Tab bar -->
+  <div id="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('draw')">Draw</button>
+    <button class="tab-btn" onclick="switchTab('polys')">Polygons <span class="tab-badge" id="poly-badge">0</span></button>
+    <button class="tab-btn" onclick="switchTab('export')">Import/Export</button>
+    <button class="tab-btn" onclick="switchTab('analysis')">Analysis</button>
+  </div>
+
+  <!-- Tab panes -->
+  <div id="tab-panes">
+
+    <!-- ── DRAW TAB ──────────────────────────────────────────────────────── -->
+    <div class="tab-pane active" id="pane-draw">
+
+      <div class="field-group">
+        <div class="field-group-label">Input mode</div>
+        <div class="btn-row">
+          <button class="btn active" id="btnPoint"    onclick="setMode('point')">Vertex click</button>
+          <button class="btn"        id="btnFreehand" onclick="setMode('freehand')">Freehand</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn go"     id="btnDraw"    onclick="toggleDraw()">Start Drawing</button>
+          <button class="btn danger"                 onclick="clearAll()">Clear All</button>
+        </div>
+        <div id="draw-notice"></div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">Tools</div>
+        <div class="btn-row">
+          <button class="btn" id="btnSnap"  onclick="toggleSnap()">Snap: Off</button>
+          <button class="btn" id="btnBrush" onclick="toggleBrush()">Hex Brush: Off</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn go" id="btnHexSelected" onclick="hexSelectedPolygons()" disabled>Hex Selected</button>
+          <button class="btn go" id="btnAutoFit" onclick="autoFit()" disabled>Run Auto-Fit</button>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">Cell cap</div>
+        <div class="sl-wrap">
+          <div class="sl-head"><span>Max cells</span><span class="sl-val" id="cellCapLabel">1,000,000</span></div>
+          <input type="range" id="cellCapSlider" min="100000" max="10000000" value="1000000" step="100000" oninput="onCellCapChange()"/>
+          <div class="sl-hint"><span>100k safe</span><span>10M heavy</span></div>
+        </div>
+        <label class="check-row">
+          <input type="checkbox" id="ignoreCellCap" onchange="onCellCapChange()"/>
+          <span>Ignore cap (may freeze browser)</span>
+        </label>
+      </div>
+
+      <!-- Resolution container moved from H3 tab -->
+      <div class="field-group">
+        <div class="field-group-label">Resolution</div>
+        <div class="sl-wrap">
+          <div class="sl-head"><span>Max resolution</span><span class="sl-val" id="resLabel">6</span></div>
+          <input type="range" id="resSlider" min="3" max="15" value="6" oninput="onParamChange()"/>
+          <div class="sl-hint"><span>3 · coarse</span><span>15 · ultra-fine</span></div>
+        </div>
+        <div class="sl-wrap">
+          <div class="sl-head"><span>Error threshold</span><span class="sl-val" id="errThreshLabel">5.00%</span></div>
+          <input type="range" id="errThreshSlider" min="0.01" max="30" step="0.01" value="5" oninput="onParamChange()"/>
+          <div class="sl-hint"><span>0.01% tight</span><span>30% loose</span></div>
+        </div>
+        <div class="sl-wrap">
+          <div class="sl-head"><span>Freehand simplify</span><span class="sl-val" id="simplifyLabel">0.0010</span></div>
+          <input type="range" id="simplifySlider" min="-4" max="-1" step="0.25" value="-3" oninput="onSimplifyChange()"/>
+          <div class="sl-hint"><span>preserve detail</span><span>aggressive</span></div>
+        </div>
+      </div>
+
+    </div><!-- /pane-draw -->
+
+    <!-- ── POLYGONS TAB ──────────────────────────────────────────────────── -->
+    <div class="tab-pane" id="pane-polys">
+      <div class="field-group">
+        <div class="field-group-label">Polygon list</div>
+        <div id="polyList">
+          <div class="notice info" style="margin:0;border-left:none;border-top:none;border-left:2px solid var(--blu);margin:8px;">No polygons yet. Draw or import.</div>
+        </div>
+      </div>
+    </div><!-- /pane-polys -->
+
+    <!-- ── IMPORT/EXPORT TAB ─────────────────────────────────────────────── -->
+    <div class="tab-pane" id="pane-export">
+
+      <div class="field-group">
+        <div class="field-group-label">Import</div>
+        <div class="btn-row">
+          <button class="btn" onclick="document.getElementById('shapeFile').click()">Import File</button>
+        </div>
+        <input type="file" id="shapeFile" accept=".zip,.json,.geojson" style="display:none;" onchange="handleShapeUpload(event)"/>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">Export</div>
+        <div class="sl-wrap">
+          <div class="sl-head" style="margin-bottom:6px;"><span>Scope</span></div>
+          <div class="scope-toggle">
+            <button class="scope-btn active" id="scopeBtnAll" onclick="setExportScope('all')">All hexed</button>
+            <button class="scope-btn" id="scopeBtnSel" onclick="setExportScope('selected')">Selected only</button>
+          </div>
+          <div class="scope-count" id="scopeCountRow" style="display:none;">
+            <span id="scopeSelCount">0</span> polygon(s) selected for export
+          </div>
+        </div>
+        <div class="sl-wrap" style="border-top:1px solid var(--line)">
+          <div class="sl-head"><span>Mode</span><span class="sl-val" id="exportModeLabel">Compacted</span></div>
+          <select id="exportMode" class="flat-select" onchange="onExportModeChange()">
+            <option value="dissolved">Dissolved outline (single polygon)</option>
+            <option value="compacted" selected>Compacted cells (mixed resolution)</option>
+            <option value="expanded">Expanded to uniform resolution</option>
+          </select>
+        </div>
+        <div id="exportResWrap" style="display:none;" class="sl-wrap">
+          <div class="sl-head"><span>Export resolution</span><span class="sl-val" id="exportResLabel">7</span></div>
+          <input type="range" id="exportResSlider" min="3" max="15" value="7" oninput="onExportResChange()"/>
+          <div class="sl-hint"><span>3</span><span>15</span></div>
+        </div>
+        <div style="padding:4px 12px 10px;font-size:11px;color:var(--tx2);line-height:1.7;">
+          GeoJSON export includes source polygon ID, error %, and resolution per cell.
+        </div>
+        <div style="padding:0 12px 12px;">
+          <button class="btn go" style="width:100%" id="btnExport" onclick="exportH3GeoJSON()" disabled>Export GeoJSON</button>
+        </div>
+      </div>
+
+    </div><!-- /pane-export -->
+
+    <!-- ── ANALYSIS TAB ──────────────────────────────────────────────────── -->
+    <div class="tab-pane" id="pane-analysis">
+
+      <div class="field-group">
+        <div class="field-group-label">Whole-map metrics</div>
+        <div id="metrics">
+          <div class="notice info" style="margin:8px;border-left:2px solid var(--blu);">Hex polygons to see aggregate metrics.</div>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">Resolution breakdown — all polygons</div>
+        <div id="resBrk">
+          <div style="padding:12px;font-size:11px;color:var(--tx2);">No data.</div>
+        </div>
+      </div>
+
+      <div class="field-group" id="debugSec" style="display:none;">
+        <div class="field-group-label" style="display:flex;align-items:center;">
+          <span style="flex:1">Debug console</span>
+          <button onclick="clearDebug()" style="background:none;border:none;color:var(--tx2);font-size:10px;cursor:pointer;font-family:var(--sans);padding:0 2px;">Clear</button>
+        </div>
+        <div id="debug-pane"></div>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">Notes</div>
+        <div style="padding:12px;font-size:11.5px;color:var(--tx1);line-height:1.75;">
+          Shift+click to multi-select polygons in the Polygons tab.<br>
+          Hex Brush: click a polygon on the map to hex it immediately.<br>
+          High cell cap values can freeze the browser tab.<br>
+          Res 6 ≈ 36 km² · Res 9 ≈ 0.7 km² · Res 12 ≈ 0.002 km²
+        </div>
+      </div>
+
+    </div><!-- /pane-analysis -->
+
+  </div><!-- /tab-panes -->
+</div><!-- /panel -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/shpjs@latest/dist/shp.js"></script>
+
+<script>
+// ── TAB SWITCHING ─────────────────────────────────────────────────────────
+function switchTab(id) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('pane-' + id).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+
+// ── STATUS PILL ───────────────────────────────────────────────────────────
+function setPill(msg, type) {
+  const p = document.getElementById('status-pill');
+  p.textContent = msg;
+  p.className = type || '';
+  clearTimeout(p._t);
+  if (type === 'ok' || type === 'info') {
+    p._t = setTimeout(() => { p.textContent = 'Ready'; p.className = ''; }, 3500);
+  }
+}
+
+// ── CDN GUARD ─────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const miss = [];
+  if (typeof h3   === 'undefined') miss.push('h3-js');
+  if (typeof turf === 'undefined') miss.push('turf');
+  if (typeof L    === 'undefined') miss.push('leaflet');
+  if (typeof shp  === 'undefined') miss.push('shpjs');
+  if (miss.length) {
+    document.body.innerHTML = `<div style="font-family:sans-serif;color:#d05c5c;padding:40px;background:#0d0d0d;height:100vh;line-height:2">
+      <b>CDN load failed: ${miss.join(', ')}</b><br>Open this file locally in Chrome or Firefox.</div>`;
+    return;
+  }
+  initApp();
+});
+
+// ── APP ───────────────────────────────────────────────────────────────────
+function initApp() {
+
+  // DEBUG
+  const _dbg = [];
+  function dbg(level, msg) {
+    const C = { err:'#d05c5c', ok:'#4caf7d', warn:'#bf9540', info:'#4a90c8' };
+    const L2 = { err:'ERR', ok:' OK', warn:'WRN', info:'INF' };
+    const ts = new Date().toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    _dbg.push(`<div style="color:${C[level]||'#5a5a5a'}"><span style="color:#3a3a3a">${ts}</span> <b>${L2[level]||'---'}</b> ${msg}</div>`);
+    if (_dbg.length > 120) _dbg.shift();
+    const el = document.getElementById('debug-pane');
+    document.getElementById('debugSec').style.display = 'block';
+    el.innerHTML = _dbg.join('');
+    el.scrollTop = el.scrollHeight;
+    console[level==='err'?'error':'log'](`[H3 ${L2[level]}] ${msg}`);
+  }
+  window.clearDebug = () => { _dbg.length = 0; document.getElementById('debug-pane').innerHTML = ''; };
+
+  // CONSTANTS
+  const RES_COLORS = {
+    3:'#e05050',4:'#e07a30',5:'#d4b030',6:'#68c068',7:'#50a0e0',
+    8:'#9060d0',9:'#d060b0',10:'#e08090',11:'#60d0b0',12:'#80a0e0',
+    13:'#c0c050',14:'#b0b0b0',15:'#e0e0e0'
+  };
+  const SNAP_DISTANCE_PX = 12;
+  const renderer = L.canvas({ padding: 0.5 });
+  const map = L.map('map', { center:[30,15], zoom:3, zoomControl:true, doubleClickZoom:false, renderer });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution:'©OpenStreetMap ©CARTO', subdomains:'abcd', maxZoom:18
+  }).addTo(map);
+
+  const legItems = document.getElementById('leg-items');
+  Object.entries(RES_COLORS).forEach(([r,c]) => {
+    legItems.insertAdjacentHTML('beforeend',
+      `<div class="leg-row"><div class="leg-swatch" style="background:${c};opacity:.85"></div><span>Res ${r}</span></div>`);
+  });
+
+  // STATE
+  let drawMode='point', isDrawing=false, simplifyTol=0.001, snapEnabled=false, hexBrushMode=false;
+  let maxCellsCap=1000000, ignoreCellCap=false;
+  let currentShape=[], previewLayer=null, mouseLayer=null, currentPolyIndex=null;
+  const selectedPolyIndices = new Set();
+  const polys = [];
+  const exportSelectedPolys = new Set(); // indices checked for selective export
+  let exportScope = 'all'; // 'all' | 'selected'
+  let openDropdownIdx = null; // which poly dropdown is open
+
+  function showStatus(msg, type='') {
+    const el = document.getElementById('draw-notice');
+    el.style.display = 'block';
+    el.innerHTML = `<div class="notice ${type}" style="margin-top:4px;">${msg}</div>`;
+    setPill(msg, type);
+  }
+  function setMode(mode) {
+    drawMode = mode;
+    document.getElementById('btnPoint').classList.toggle('active', mode==='point');
+    document.getElementById('btnFreehand').classList.toggle('active', mode==='freehand');
+  }
+  function onSimplifyChange() {
+    const v = parseFloat(document.getElementById('simplifySlider').value);
+    simplifyTol = Math.pow(10,v);
+    document.getElementById('simplifyLabel').textContent = simplifyTol.toFixed(4);
+  }
+  function onCellCapChange() {
+    maxCellsCap = parseInt(document.getElementById('cellCapSlider').value,10);
+    ignoreCellCap = document.getElementById('ignoreCellCap').checked;
+    document.getElementById('cellCapLabel').textContent = ignoreCellCap ? '∞' : maxCellsCap.toLocaleString();
+  }
+  function toggleSnap() {
+    snapEnabled = !snapEnabled;
+    const btn = document.getElementById('btnSnap');
+    btn.textContent = `Snap: ${snapEnabled?'On':'Off'}`;
+    btn.classList.toggle('on', snapEnabled);
+    showStatus(snapEnabled?'Vertex snap enabled':'Snap disabled', snapEnabled?'ok':'info');
+  }
+  function toggleBrush() {
+    hexBrushMode = !hexBrushMode;
+    const btn = document.getElementById('btnBrush');
+    btn.textContent = `Hex Brush: ${hexBrushMode?'On':'Off'}`;
+    btn.classList.toggle('on', hexBrushMode);
+    showStatus(hexBrushMode?'Hex Brush active — click polygon':'Hex Brush off', hexBrushMode?'ok':'info');
+  }
+  function canHexCells(count) { return ignoreCellCap || count <= maxCellsCap; }
+
+  // GEOMETRY
+  function featureVertices(feature) {
+    const pts=[];
+    if(feature?.geometry?.type==='Polygon')
+      feature.geometry.coordinates.forEach(ring=>ring.forEach(coord=>pts.push(L.latLng(coord[1],coord[0]))));
+    return pts;
+  }
+  function normalizeImportedToPolygonFeatures(input) {
+    const out=[];
+    const push=(feat)=>{
+      if(feat?.geometry?.type==='Polygon') out.push({type:'Feature',properties:{...feat.properties},geometry:{type:'Polygon',coordinates:feat.geometry.coordinates}});
+      else if(feat?.geometry?.type==='MultiPolygon') feat.geometry.coordinates.forEach((coords,i)=>out.push({type:'Feature',properties:{...feat.properties,__part:i+1},geometry:{type:'Polygon',coordinates:coords}}));
+    };
+    if(Array.isArray(input)) input.forEach(i=>{ if(i?.type==='FeatureCollection') i.features.forEach(push); else if(i?.type==='Feature') push(i); });
+    else if(input?.type==='FeatureCollection') input.features.forEach(push);
+    else if(input?.type==='Feature') push(input);
+    return out;
+  }
+  function ensureClosedRing(ring) {
+    if(!ring||ring.length<3) return ring;
+    const first=ring[0],last=ring[ring.length-1];
+    if(first[0]!==last[0]||first[1]!==last[1]) return [...ring,[...first]];
+    return ring;
+  }
+  function buildCleanTurfPolygonFromFeature(feature) {
+    if(!feature?.geometry?.type==='Polygon') return null;
+    const rings=feature.geometry.coordinates.map(r=>ensureClosedRing(r));
+    let poly; try{ poly=turf.polygon(rings); }catch{ return null; }
+    try{
+      const kinks=turf.kinks(poly);
+      if(kinks.features.length>0){
+        const pieces=turf.unkinkPolygon(poly);
+        if(pieces.features.length>0){ pieces.features.sort((a,b)=>turf.area(b)-turf.area(a)); poly=pieces.features[0]; }
+      }
+    }catch{}
+    return poly;
+  }
+  function ringToLatLngCoords(boundary) {
+    if(!boundary?.length) return [];
+    const coords=boundary.map(p=>[p[1],p[0]]);
+    const out=[coords[0].slice()];
+    for(let i=1;i<coords.length;i++){
+      let [lng,lat]=coords[i]; const prevLng=out[i-1][0];
+      while(lng-prevLng>180) lng-=360;
+      while(lng-prevLng<-180) lng+=360;
+      out.push([lng,lat]);
+    }
+    out.push([...out[0]]);
+    return out;
+  }
+
+  // POLYGON MANAGEMENT
+  function addPolyObject(feature,opts={}) {
+    const id=polys.length+1;
+    const name=opts.name||`Polygon #${id}`;
+    const poly={id,name,source:opts.source||'import',feature,drawnLayer:null,h3Layer:null,result:null,hexed:false};
+    polys.push(poly);
+    renderSourcePoly(poly,false);
+    updatePolyList();
+    updateExportAvailability();
+    return poly;
+  }
+  function renderSourcePoly(poly,active) {
+    if(poly.drawnLayer) map.removeLayer(poly.drawnLayer);
+    poly.drawnLayer=L.geoJSON(poly.feature,{renderer,style:{color:active?'#7c5cbf':'#d05c5c',weight:active?2.5:1.5,fill:false,dashArray:'6,4',opacity:0.9}}).addTo(map);
+  }
+  function clearLayer(layer) { if(layer) map.removeLayer(layer); }
+  function renderPreview(vertices) {
+    clearLayer(previewLayer);
+    if(vertices.length>=2) previewLayer=L.polyline([...vertices,vertices[0]],{color:'#d05c5c',weight:1.5,opacity:0.9}).addTo(map);
+  }
+  function updateMouseLine(vertices,cursor) {
+    clearLayer(mouseLayer);
+    if(vertices.length>0&&cursor) mouseLayer=L.polyline([...vertices,cursor,vertices[0]],{color:'#7c5cbf',weight:1,dashArray:'4,4',opacity:0.5}).addTo(map);
+  }
+  function updateSelectionVisuals() {
+    polys.forEach((p,i)=>{
+      const active=i===currentPolyIndex;
+      if(p.drawnLayer) p.drawnLayer.setStyle({color:active?'#7c5cbf':'#d05c5c',weight:active?2.5:1.5,opacity:0.9});
+    });
+  }
+  function selectSinglePoly(idx) {
+    selectedPolyIndices.clear(); selectedPolyIndices.add(idx);
+    currentPolyIndex=idx;
+    updateSelectionVisuals(); updatePolyList(); updateSelectionMetrics();
+  }
+  function toggleSelectPoly(idx) {
+    if(selectedPolyIndices.has(idx)) selectedPolyIndices.delete(idx); else selectedPolyIndices.add(idx);
+    if(selectedPolyIndices.size===0) selectedPolyIndices.add(idx);
+    currentPolyIndex=idx;
+    updateSelectionVisuals(); updatePolyList(); updateSelectionMetrics();
+  }
+  function selectedIndices() { return [...selectedPolyIndices].sort((a,b)=>a-b); }
+  function currentTargets() { const sel=selectedIndices(); return sel.length?sel:(currentPolyIndex==null?[]:[currentPolyIndex]); }
+  function updateSelectionMetrics() { renderWholeMapMetrics(); }
+
+  function updatePolyList() {
+    const el=document.getElementById('polyList');
+    const badge=document.getElementById('poly-badge');
+    badge.textContent=polys.length;
+    badge.style.display=polys.length?'':'none';
+    if(!polys.length){
+      el.innerHTML='<div class="notice info" style="margin:10px;border-left:2px solid var(--blu);">No polygons. Draw or import to begin.</div>';
+      el.className='';
+      document.getElementById('btnExport').disabled=true;
+      document.getElementById('btnHexSelected').disabled=true;
+      updateScopeCount();
+      return;
+    }
+    el.innerHTML='';
+    el.className='poly-list';
+    document.getElementById('btnExport').disabled=!polys.some(p=>p.hexed&&p.result?.cells?.length);
+    document.getElementById('btnHexSelected').disabled=currentTargets().length===0;
+    polys.forEach((p,i)=>{
+      const isActive=i===currentPolyIndex, isSel=selectedPolyIndices.has(i);
+      const isExpOpen=openDropdownIdx===i;
+      const isExportChecked=exportSelectedPolys.has(i);
+      const err=p.result?.errorPct!=null?`${p.result.errorPct.toFixed(2)}%`:'—';
+      const res=p.result?.maxRes!=null?`R${p.result.maxRes}`:'—';
+
+      const item=document.createElement('div');
+      item.className='poly-item'+(isActive?' active':'')+(isSel&&!isActive?' selected':'')+(p.hexed?' hexed':'');
+      item.innerHTML=`
+        <div class="poly-status-dot"></div>
+        <div class="poly-meta">
+          <div class="poly-name">${p.name}</div>
+          <div class="poly-sub">${p.source} · ${p.hexed?'hexed':'pending'} · ${res} · err ${err}</div>
+        </div>
+        <div class="poly-actions">
+          <input type="checkbox" class="poly-export-cb" title="Include in export"${isExportChecked?' checked':''}>
+          <button class="poly-expand-btn${isExpOpen?' open':''}" title="Show metrics">${isExpOpen?'▴':'▾'}</button>
+          <button class="poly-del" title="Delete">×</button>
+        </div>`;
+
+      const drop=document.createElement('div');
+      drop.className='poly-dropdown'+(isExpOpen?' open':'');
+      if(isExpOpen) drop.innerHTML=p.result?polyInlineMetricsHTML(p):'<div style="padding:10px 12px;font-size:11px;color:var(--tx2);">Not hexed yet.</div>';
+
+      item.addEventListener('click',e=>{
+        if(e.target.closest('.poly-del')||e.target.closest('.poly-expand-btn')||e.target.closest('.poly-export-cb')) return;
+        if(e.shiftKey) toggleSelectPoly(i); else selectSinglePoly(i);
+      });
+      item.querySelector('.poly-del').addEventListener('click',e=>{ e.stopPropagation(); deletePolygon(i); });
+      item.querySelector('.poly-export-cb').addEventListener('click',e=>{ e.stopPropagation(); togglePolyExportCb(i); });
+      item.querySelector('.poly-expand-btn').addEventListener('click',e=>{ e.stopPropagation(); togglePolyDropdown(i); });
+
+      el.appendChild(item);
+      el.appendChild(drop);
+    });
+    updateScopeCount();
+  }
+
+
+  function deletePolygon(idx) {
+    // Close dropdown if it was open for this or a shifted index
+    if(openDropdownIdx===idx) openDropdownIdx=null;
+    else if(openDropdownIdx!==null&&openDropdownIdx>idx) openDropdownIdx--;
+
+    clearLayer(polys[idx].drawnLayer); clearLayer(polys[idx].h3Layer);
+    polys.splice(idx,1);
+
+    // Adjust currentPolyIndex / selectedPolyIndices after splice
+    if(currentPolyIndex===idx) currentPolyIndex=polys.length?Math.min(idx,polys.length-1):null;
+    else if(currentPolyIndex!==null&&currentPolyIndex>idx) currentPolyIndex--;
+    const newSel=new Set();
+    selectedPolyIndices.forEach(s=>{ if(s<idx) newSel.add(s); else if(s>idx) newSel.add(s-1); });
+    selectedPolyIndices.clear(); newSel.forEach(s=>selectedPolyIndices.add(s));
+    // Adjust exportSelectedPolys
+    const newExp=new Set();
+    exportSelectedPolys.forEach(s=>{ if(s<idx) newExp.add(s); else if(s>idx) newExp.add(s-1); });
+    exportSelectedPolys.clear(); newExp.forEach(s=>exportSelectedPolys.add(s));
+
+    if(!polys.length) {
+      document.getElementById('metrics').innerHTML='<div class="notice info" style="margin:8px;border-left:2px solid var(--blu);">Hex polygons to see aggregate metrics.</div>';
+      document.getElementById('resBrk').innerHTML='<div style="padding:12px;font-size:11px;color:var(--tx2);">No data.</div>';
+    } else {
+      updateSelectionVisuals();
+      renderWholeMapMetrics();
+    }
+    updatePolyList(); // always update list UI
+    updateExportAvailability();
+    showStatus('Polygon deleted','info');
+  }
+
+  // H3 CORE
+  function featureToCellLoops(feature) {
+    if(!feature?.geometry?.type==='Polygon') return null;
+    return feature.geometry.coordinates.map(ring=>ensureClosedRing(ring));
+  }
+  function computeAtRes(feature,maxRes) {
+    const turfPoly=buildCleanTurfPolygonFromFeature(feature);
+    if(!turfPoly) return {err:'bad_polygon',msg:'Invalid geometry'};
+    const loops=featureToCellLoops(feature);
+    if(!loops) return {err:'bad_polygon'};
+    try{
+      const cells=h3.polygonToCells(loops,maxRes,true);
+      if(!cells||cells.length===0) return {err:'empty'};
+      if(!canHexCells(cells.length)) return {err:'too_many',count:cells.length,cap:maxCellsCap};
+      const compacted=h3.compactCells(cells);
+      const drawnArea=turf.area(turfPoly);
+      let h3Area=0;
+      for(const cell of compacted){
+        try{ h3Area+=h3.cellArea(cell,'m2'); }
+        catch{ const r=h3.getResolution(cell); h3Area+=(r===3?1.77e9:r===4?2.529e8:r===5?3.61e7:r===6?5.16e6:r===7?7.37e5:r===8?1.05e5:r===9?1.5e4:1e5); }
+      }
+      const errorPct=drawnArea>0?Math.abs(h3Area-drawnArea)/drawnArea*100:0;
+      return {cells:compacted,rawCount:cells.length,compactCount:compacted.length,drawnArea,h3Area,errorPct,maxRes};
+    }catch(e){ return {err:'polyfill_failed',msg:e.message}; }
+  }
+
+  function renderH3(poly,cells) {
+    clearLayer(poly.h3Layer);
+    const features=cells.map(cell=>{
+      const boundary=h3.cellToBoundary(cell);
+      const coords=ringToLatLngCoords(boundary);
+      return {type:'Feature',geometry:{type:'Polygon',coordinates:[coords]},properties:{resolution:h3.getResolution(cell)}};
+    });
+    poly.h3Layer=L.geoJSON({type:'FeatureCollection',features},{renderer,
+      style:f=>{ const c=RES_COLORS[f.properties.resolution]||'#fff'; return {color:c,weight:0.6,fillColor:c,fillOpacity:0.25,opacity:0.75}; }
+    }).addTo(map);
+    if(poly.drawnLayer) poly.drawnLayer.bringToFront();
+  }
+
+  // Returns metrics HTML for a single polygon — used by inline dropdown
+  function polyInlineMetricsHTML(poly) {
+    const r=poly.result;
+    if(!r) return '<div style="padding:10px 12px;font-size:11px;color:var(--tx2);">Not hexed yet.</div>';
+    const thresh=parseFloat(document.getElementById('errThreshSlider').value);
+    const met=r.errorPct<=thresh;
+    const errCls=met?'ok':(r.errorPct<thresh*2?'warn':'bad');
+    const ratio=(r.compactCount/r.rawCount*100).toFixed(1);
+    return `<div class="metric-grid">
+        <div class="metric-cell"><div class="mk">Error</div><div class="mv ${errCls}">${r.errorPct.toFixed(2)}% ${met?'✓':'✗'}</div></div>
+        <div class="metric-cell"><div class="mk">Res</div><div class="mv">R${r.maxRes}</div></div>
+        <div class="metric-cell"><div class="mk">Raw cells</div><div class="mv">${r.rawCount.toLocaleString()}</div></div>
+        <div class="metric-cell"><div class="mk">Compact</div><div class="mv ok">${r.compactCount.toLocaleString()}</div></div>
+        <div class="metric-cell"><div class="mk">Drawn area</div><div class="mv">${(r.drawnArea/1e6).toFixed(2)} km²</div></div>
+        <div class="metric-cell"><div class="mk">H3 area</div><div class="mv">${(r.h3Area/1e6).toFixed(2)} km²</div></div>
+        <div class="metric-cell span2"><div class="mk">Compaction ratio</div><div class="mv">${ratio}%</div></div>
+      </div>`;
+  }
+
+  // Renders aggregate whole-map metrics to the Analysis tab
+  function renderWholeMapMetrics() {
+    const hexed=polys.filter(p=>p.hexed&&p.result);
+    if(!hexed.length){
+      document.getElementById('metrics').innerHTML='<div class="notice info" style="margin:8px;border-left:2px solid var(--blu);">Hex polygons to see aggregate metrics.</div>';
+      document.getElementById('resBrk').innerHTML='<div style="padding:12px;font-size:11px;color:var(--tx2);">No data.</div>';
+      return;
+    }
+    const totalRaw=hexed.reduce((s,p)=>s+p.result.rawCount,0);
+    const totalCompact=hexed.reduce((s,p)=>s+p.result.compactCount,0);
+    const totalDrawn=hexed.reduce((s,p)=>s+p.result.drawnArea,0);
+    const totalH3=hexed.reduce((s,p)=>s+p.result.h3Area,0);
+    const avgErr=(hexed.reduce((s,p)=>s+p.result.errorPct,0)/hexed.length).toFixed(2);
+    const maxErr=Math.max(...hexed.map(p=>p.result.errorPct)).toFixed(2);
+    const ratio=(totalCompact/totalRaw*100).toFixed(1);
+    const thresh=parseFloat(document.getElementById('errThreshSlider').value);
+    const allMet=hexed.every(p=>p.result.errorPct<=thresh);
+    const errCls=allMet?'ok':(parseFloat(avgErr)<thresh*2?'warn':'bad');
+    document.getElementById('metrics').innerHTML=`
+      <div class="metric-grid">
+        <div class="metric-cell"><div class="mk">Hexed polys</div><div class="mv ok">${hexed.length} / ${polys.length}</div></div>
+        <div class="metric-cell"><div class="mk">Avg error</div><div class="mv ${errCls}">${avgErr}%</div></div>
+        <div class="metric-cell"><div class="mk">Max error</div><div class="mv ${parseFloat(maxErr)<=thresh?'ok':'bad'}">${maxErr}%</div></div>
+        <div class="metric-cell"><div class="mk">All within threshold</div><div class="mv ${allMet?'ok':'bad'}">${allMet?'Yes ✓':'No ✗'}</div></div>
+        <div class="metric-cell"><div class="mk">Total raw cells</div><div class="mv">${totalRaw.toLocaleString()}</div></div>
+        <div class="metric-cell"><div class="mk">Total compact</div><div class="mv ok">${totalCompact.toLocaleString()}</div></div>
+        <div class="metric-cell"><div class="mk">Total drawn area</div><div class="mv">${(totalDrawn/1e6).toFixed(0)} km²</div></div>
+        <div class="metric-cell"><div class="mk">Total H3 area</div><div class="mv">${(totalH3/1e6).toFixed(0)} km²</div></div>
+        <div class="metric-cell span2"><div class="mk">Compaction ratio</div><div class="mv">${ratio}% of raw</div></div>
+      </div>`;
+    // Aggregate resolution breakdown
+    const counts={};
+    hexed.forEach(p=>p.result.cells.forEach(c=>{ const r=h3.getResolution(c); counts[r]=(counts[r]||0)+1; }));
+    if(Object.keys(counts).length){
+      const maxC=Math.max(...Object.values(counts)), total=Object.values(counts).reduce((a,b)=>a+b,0);
+      let html='<div class="res-rows">';
+      for(const [res,cnt] of Object.entries(counts).sort((a,b)=>+a[0]-+b[0])){
+        const col=RES_COLORS[res]||'#aaa';
+        html+=`<div class="res-row"><div class="res-dot" style="background:${col}"></div><span class="res-label">Res ${res}</span><div class="res-bar-bg"><div class="res-bar-fg" style="width:${(cnt/maxC*100).toFixed(0)}%;background:${col};opacity:.85"></div></div><span class="res-num">${cnt} <span style="opacity:.55">${(cnt/total*100).toFixed(1)}%</span></span></div>`;
+      }
+      html+='</div>';
+      document.getElementById('resBrk').innerHTML=html;
+    }
+  }
+
+  // Legacy alias - still used internally to trigger whole-map update
+  function renderMetrics(poly) { renderWholeMapMetrics(); }
+
+  // renderBreakdown is now folded into renderWholeMapMetrics
+  function renderBreakdown(poly) { renderWholeMapMetrics(); }
+
+  // EXPORT SCOPE & POLY DROPDOWN HELPERS
+  function togglePolyExportCb(idx) {
+    if(exportSelectedPolys.has(idx)) exportSelectedPolys.delete(idx);
+    else exportSelectedPolys.add(idx);
+    // Update just the checkbox without full re-render
+    const item=document.querySelector(`.poly-item[data-idx="${idx}"] .poly-export-cb`);
+    if(item) item.checked=exportSelectedPolys.has(idx);
+    // Also update via re-render to keep consistent
+    const items=document.querySelectorAll('.poly-item');
+    items.forEach(el=>{ if(el.dataset.idx==idx){ const cb=el.querySelector('.poly-export-cb'); if(cb) cb.checked=exportSelectedPolys.has(idx); } });
+    updateScopeCount();
+    updateExportAvailability();
+  }
+
+  function togglePolyDropdown(idx) {
+    openDropdownIdx = openDropdownIdx===idx ? null : idx;
+    // Re-render just the list to update dropdown state
+    updatePolyList();
+  }
+
+  function setExportScope(scope) {
+    exportScope=scope;
+    document.getElementById('scopeBtnAll').classList.toggle('active', scope==='all');
+    document.getElementById('scopeBtnSel').classList.toggle('active', scope==='selected');
+    document.getElementById('scopeCountRow').style.display=scope==='selected'?'flex':'none';
+    updateExportAvailability();
+  }
+
+  function updateScopeCount() {
+    const selExportable=polys.filter((p,i)=>exportSelectedPolys.has(i)&&p.hexed&&p.result?.cells?.length).length;
+    document.getElementById('scopeSelCount').textContent=selExportable;
+  }
+
+  function switchTabByName(name) {
+    document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('pane-'+name).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b=>{
+      if(b.getAttribute('onclick')&&b.getAttribute('onclick').includes("'"+name+"'")) b.classList.add('active');
+    });
+  }
+
+  // EXPORT
+  function cellToFeature(cell,props={}) {
+    const boundary=h3.cellToBoundary(cell);
+    const coords=ringToLatLngCoords(boundary);
+    return {type:'Feature',geometry:{type:'Polygon',coordinates:[coords]},properties:{h3_index:cell,h3_res:h3.getResolution(cell),...props}};
+  }
+  function dissolveFeatures(features) {
+    if(!features.length) return null;
+    let acc=features[0];
+    for(let i=1;i<features.length;i++){ try{ const next=turf.union(acc,features[i]); if(next) acc=next; }catch{} }
+    return acc;
+  }
+  function estimateExpandedCellCount(cells,targetRes) {
+    let est=0;
+    for(const cell of cells){ const r=h3.getResolution(cell); if(r>targetRes) return Infinity; est+=Math.pow(7,targetRes-r); if(est>500000) return est; }
+    return est;
+  }
+  function yieldToUI() { return new Promise(r=>setTimeout(r,0)); }
+  async function expandCellsToResolution(cells,targetRes,onProgress) {
+    const expanded=[], CHUNK=200;
+    for(let i=0;i<cells.length;i+=CHUNK){
+      expanded.push(...h3.uncompactCells(cells.slice(i,i+CHUNK),targetRes));
+      if(onProgress) onProgress(Math.min(i+CHUNK,cells.length),cells.length,expanded.length);
+      await yieldToUI();
+    }
+    return expanded;
+  }
+  function updateExportModeUI() {
+    const mode=document.getElementById('exportMode').value;
+    document.getElementById('exportResWrap').style.display=mode==='expanded'?'block':'none';
+    document.getElementById('exportModeLabel').textContent=document.querySelector(`#exportMode option[value="${mode}"]`).textContent.split(' (')[0];
+  }
+  function onExportResChange() { document.getElementById('exportResLabel').textContent=document.getElementById('exportResSlider').value; }
+  function updateExportAvailability() {
+    const hasAny=polys.some(p=>p.hexed&&p.result?.cells?.length);
+    const hasSelected=polys.some((p,i)=>exportSelectedPolys.has(i)&&p.hexed&&p.result?.cells?.length);
+    document.getElementById('btnExport').disabled = exportScope==='selected' ? !hasSelected : !hasAny;
+  }
+
+  async function exportH3GeoJSON() {
+    const exportBtn=document.getElementById('btnExport');
+    const exportable = exportScope==='selected'
+      ? polys.filter((p,i)=>exportSelectedPolys.has(i)&&p.hexed&&p.result?.cells?.length)
+      : polys.filter(p=>p.hexed&&p.result?.cells?.length);
+    if(!exportable.length){ showStatus('Nothing to export','warn'); return; }
+    const mode=document.getElementById('exportMode').value;
+    const exportRes=parseInt(document.getElementById('exportResSlider').value,10);
+    exportBtn.disabled=true; showStatus('Preparing export…','info');
+    try{
+      const cellFeatures=[];
+      for(const poly of exportable){
+        let cells=poly.result.cells.slice();
+        if(mode==='expanded'){
+          const currentMaxRes=Math.max(...cells.map(c=>h3.getResolution(c)));
+          if(exportRes<currentMaxRes) throw new Error(`Export res must be ≥ ${currentMaxRes}`);
+          const est=estimateExpandedCellCount(cells,exportRes);
+          if(!Number.isFinite(est)||est>500000) throw new Error(`Estimated cells too large: ${Math.ceil(est).toLocaleString()}`);
+          cells=await expandCellsToResolution(cells,exportRes,(done,total,out)=>{
+            showStatus(`Expanding: ${done}/${total} → ${out.toLocaleString()} cells`,'info');
+          });
+        }
+        for(let i=0;i<cells.length;i++){
+          cellFeatures.push(cellToFeature(cells[i],{source_polygon_id:poly.id,source_polygon_name:poly.name,export_mode:mode,error_pct:poly.result.errorPct,max_res:poly.result.maxRes}));
+          if(i%1000===0) await yieldToUI();
+        }
+      }
+      let out;
+      if(mode==='dissolved'){
+        const dissolved=dissolveFeatures(cellFeatures);
+        if(!dissolved) throw new Error('Dissolve failed');
+        dissolved.properties={export_mode:mode,source_polygon_ids:exportable.map(p=>p.id),cell_count:cellFeatures.length};
+        out={type:'FeatureCollection',features:[dissolved]};
+      } else { out={type:'FeatureCollection',features:cellFeatures}; }
+      const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/geo+json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=`h3_${mode}_${new Date().toISOString().slice(0,19)}.geojson`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+      showStatus(`Exported ${cellFeatures.length.toLocaleString()} cells`,'ok');
+    }catch(e){ showStatus(`Export failed: ${e.message}`,'error'); }
+    finally{ exportBtn.disabled=!polys.some(p=>p.hexed&&p.result?.cells?.length); }
+  }
+
+  // HEX
+  function hexPolygonByIndex(idx,opts={}) {
+    const poly=polys[idx]; if(!poly) return false;
+    const maxRes=opts.maxRes||parseInt(document.getElementById('resSlider').value,10);
+    const result=computeAtRes(poly.feature,maxRes);
+    poly.result=result;
+    if(result.err){
+      if(result.err==='too_many'){
+        document.getElementById('metrics').innerHTML=`<div class="notice error" style="margin:8px;border-left:2px solid var(--red)">⚠ ${result.count.toLocaleString()} cells exceed cap. Raise limit or enable ignore.</div>`;
+      }else{
+        document.getElementById('metrics').innerHTML=`<div class="notice error" style="margin:8px;border-left:2px solid var(--red)">H3 error: ${result.msg||result.err}</div>`;
+      }
+      return false;
+    }
+    poly.hexed=true;
+    renderH3(poly,result.cells);
+    renderMetrics(poly);
+    renderBreakdown(poly);
+    document.getElementById('btnAutoFit').disabled=false;
+    updatePolyList(); updateExportAvailability();
+    dbg('ok',`"${poly.name}" → ${result.compactCount} cells, err ${result.errorPct.toFixed(2)}%`);
+    return true;
+  }
+
+  function hexSelectedPolygons() {
+    const targets=currentTargets();
+    if(!targets.length){ showStatus('Select at least one polygon','warn'); return; }
+    let success=0;
+    const res=parseInt(document.getElementById('resSlider').value,10);
+    targets.forEach(idx=>{ if(hexPolygonByIndex(idx,{maxRes:res})) success++; });
+    showStatus(`Hexed ${success}/${targets.length} at res ${res}`, success?'ok':'warn');
+  }
+
+  // SNAP
+  function snapLatLng(latlng,excludePolyIndex=null) {
+    if(!snapEnabled||polys.length===0) return latlng;
+    const candidates=[];
+    polys.forEach((p,idx)=>{ if(idx===excludePolyIndex) return; featureVertices(p.feature).forEach(v=>candidates.push(v)); });
+    if(!candidates.length) return latlng;
+    const p0=map.latLngToContainerPoint(latlng);
+    let best=null,bestD=Infinity;
+    for(const c of candidates){ const pc=map.latLngToContainerPoint(c); const d=p0.distanceTo(pc); if(d<bestD){ bestD=d; best=c; } }
+    return bestD<=SNAP_DISTANCE_PX?best:latlng;
+  }
+
+  // MAP CLICK
+  function selectPolygonAtLatLng(latlng) {
+    const pt=turf.point([latlng.lng,latlng.lat]);
+    const hits=[];
+    polys.forEach((p,idx)=>{ try{ if(turf.booleanPointInPolygon(pt,p.feature)) hits.push({idx,area:turf.area(p.feature)}); }catch{} });
+    if(!hits.length) return -1;
+    hits.sort((a,b)=>a.area-b.area);
+    return hits[0].idx;
+  }
+  function onMapClick(e) {
+    if(isDrawing) return;
+    const idx=selectPolygonAtLatLng(e.latlng);
+    if(idx===-1) return;
+    if(hexBrushMode){ selectSinglePoly(idx); hexPolygonByIndex(idx); }
+    else { selectSinglePoly(idx); }
+  }
+
+  // IMPORT
+  async function handleShapeUpload(ev) {
+    const file=ev.target.files?.[0]; ev.target.value=''; if(!file) return;
+    showStatus(`Loading ${file.name}…`,'info');
+    try{
+      let imported;
+      const ext=(file.name.split('.').pop()||'').toLowerCase();
+      if(ext==='json'||ext==='geojson') imported=JSON.parse(await file.text());
+      else imported=await shp(await file.arrayBuffer());
+      const features=normalizeImportedToPolygonFeatures(imported);
+      if(!features.length) throw new Error('No polygon features found');
+      let count=0;
+      for(let i=0;i<features.length;i++){
+        addPolyObject(features[i],{source:'import',name:`${file.name.split('.')[0]} · ${i+1}`}); count++;
+        await yieldToUI();
+      }
+      if(currentPolyIndex==null&&polys.length) selectSinglePoly(0);
+      updateExportAvailability();
+      showStatus(`Imported ${count} polygon(s)`,'ok');
+    }catch(e){ showStatus(`Import failed: ${e.message}`,'error'); }
+  }
+
+  // DRAW
+  function addManualPolygon(latlngs) {
+    const coords=latlngs.map(p=>[p.lng,p.lat]);
+    if(coords.length<3) return;
+    if(coords[0][0]!==coords[coords.length-1][0]||coords[0][1]!==coords[coords.length-1][1]) coords.push([...coords[0]]);
+    const feature={type:'Feature',properties:{},geometry:{type:'Polygon',coordinates:[coords]}};
+    const poly=addPolyObject(feature,{source:'draw',name:`Drawn #${polys.length}`});
+    if(poly) selectSinglePoly(poly.id-1);
+  }
+  function clearWorkingOverlays() { clearLayer(previewLayer); previewLayer=null; clearLayer(mouseLayer); mouseLayer=null; }
+
+  function startDraw() {
+    isDrawing=true; currentShape=[];
+    const btn=document.getElementById('btnDraw');
+    btn.textContent='Stop Drawing'; btn.classList.remove('go'); btn.classList.add('active');
+    document.getElementById('cursor-hint').style.display='block';
+    document.getElementById('map').classList.add('draw-active');
+    showStatus(drawMode==='point'?'Click to place vertices. Double-click to close.':'Click and drag to draw.','info');
+    map.dragging.disable();
+    if(drawMode==='point'){ map.on('click',onPointClick); map.on('dblclick',onPointDblClick); map.on('mousemove',onPointMouseMove); }
+    else { map.getContainer().addEventListener('mousedown',onFreehandStart); }
+  }
+  function finishDraw() {
+    isDrawing=false;
+    map.off('click',onPointClick); map.off('dblclick',onPointDblClick); map.off('mousemove',onPointMouseMove);
+    map.getContainer().removeEventListener('mousedown',onFreehandStart);
+    document.removeEventListener('mousemove',onFreehandMove); document.removeEventListener('mouseup',onFreehandEnd);
+    clearWorkingOverlays();
+    const btn=document.getElementById('btnDraw');
+    btn.textContent='Start Drawing'; btn.classList.remove('active'); btn.classList.add('go');
+    document.getElementById('cursor-hint').style.display='none';
+    document.getElementById('map').classList.remove('draw-active');
+    document.getElementById('draw-notice').style.display='none';
+    map.dragging.enable();
+    if(currentShape.length>=3) addManualPolygon(currentShape.slice());
+  }
+  function toggleDraw() { isDrawing?finishDraw():startDraw(); }
+  function onPointClick(e) { currentShape.push(snapLatLng(e.latlng)); renderPreview(currentShape); }
+  function onPointDblClick() { if(currentShape.length<3) return; currentShape.pop(); finishDraw(); }
+  function onPointMouseMove(e) { if(!currentShape.length) return; updateMouseLine(currentShape,snapLatLng(e.latlng)); }
+  function onFreehandStart(e) {
+    if(!isDrawing) return;
+    currentShape=[snapLatLng(map.mouseEventToLatLng(e))];
+    document.addEventListener('mousemove',onFreehandMove); document.addEventListener('mouseup',onFreehandEnd);
+  }
+  function onFreehandMove(e) {
+    const ll=snapLatLng(map.mouseEventToLatLng(e)); currentShape.push(ll);
+    clearLayer(previewLayer); previewLayer=L.polyline(currentShape,{color:'#d05c5c',weight:1.5,opacity:0.9}).addTo(map);
+  }
+  function onFreehandEnd() {
+    document.removeEventListener('mousemove',onFreehandMove); document.removeEventListener('mouseup',onFreehandEnd);
+    if(currentShape.length<3) return;
+    const simplified=turf.simplify(turf.lineString(currentShape.map(p=>[p.lng,p.lat])),{tolerance:simplifyTol,highQuality:true});
+    currentShape=simplified.geometry.coordinates.map(c=>snapLatLng(L.latLng(c[1],c[0])));
+    finishDraw();
+  }
+
+  function clearAll() {
+    polys.forEach(p=>{ clearLayer(p.drawnLayer); clearLayer(p.h3Layer); }); polys.length=0;
+    currentPolyIndex=null; selectedPolyIndices.clear(); exportSelectedPolys.clear(); openDropdownIdx=null; currentShape=[]; clearWorkingOverlays();
+    document.getElementById('btnAutoFit').disabled=true;
+    document.getElementById('btnHexSelected').disabled=true;
+    document.getElementById('btnExport').disabled=true;
+    document.getElementById('metrics').innerHTML='<div class="notice info" style="margin:8px;border-left:2px solid var(--blu);">Hex polygons to see aggregate metrics.</div>';
+    document.getElementById('resBrk').innerHTML='<div style="padding:12px;font-size:11px;color:var(--tx2);">No data.</div>';
+    document.getElementById('polyList').innerHTML='<div class="notice info" style="margin:10px;border-left:2px solid var(--blu);">No polygons. Draw or import to begin.</div>';
+    document.getElementById('poly-badge').textContent='0';
+    if(isDrawing) finishDraw();
+    showStatus('Cleared','info');
+  }
+
+  function onParamChange() {
+    document.getElementById('resLabel').textContent=document.getElementById('resSlider').value;
+    document.getElementById('errThreshLabel').textContent=parseFloat(document.getElementById('errThreshSlider').value).toFixed(2)+'%';
+    if(currentPolyIndex!=null&&polys[currentPolyIndex]?.hexed&&selectedIndices().length<=1)
+      hexPolygonByIndex(currentPolyIndex,{maxRes:parseInt(document.getElementById('resSlider').value,10)});
+  }
+
+  async function autoFit() {
+    const targets=currentTargets();
+    if(!targets.length) return;
+    const thresh=parseFloat(document.getElementById('errThreshSlider').value);
+    document.getElementById('btnAutoFit').disabled=true;
+    showStatus(`Auto-fitting ${targets.length} polygon(s)…`,'info');
+    let success=0;
+    for(const idx of targets){
+      const poly=polys[idx]; let best=null;
+      for(let res=3;res<=15;res++){
+        const result=computeAtRes(poly.feature,res);
+        if(result.err==='too_many') break;
+        if(result.err) continue;
+        best=result;
+        if(result.errorPct<=thresh){
+          poly.hexed=true; poly.result=result;
+          renderH3(poly,result.cells); renderMetrics(poly); renderBreakdown(poly); success++; break;
+        }
+        await yieldToUI();
+      }
+      if(best&&best.errorPct>thresh){
+        poly.hexed=true; poly.result=best;
+        renderH3(poly,best.cells); renderMetrics(poly); renderBreakdown(poly); success++;
+      }
+      await yieldToUI();
+    }
+    updatePolyList(); updateExportAvailability();
+    document.getElementById('btnAutoFit').disabled=false;
+    showStatus(`Auto-fit complete — ${success} updated`,'ok');
+  }
+
+  // EXPOSE
+  window.setMode=setMode; window.toggleDraw=toggleDraw; window.clearAll=clearAll;
+  window.toggleSnap=toggleSnap; window.toggleBrush=toggleBrush;
+  window.hexSelectedPolygons=hexSelectedPolygons; window.handleShapeUpload=handleShapeUpload;
+  window.onParamChange=onParamChange; window.onSimplifyChange=onSimplifyChange;
+  window.onExportModeChange=updateExportModeUI; window.onExportResChange=onExportResChange;
+  window.onCellCapChange=onCellCapChange; window.exportH3GeoJSON=exportH3GeoJSON; window.autoFit=autoFit;
+  window.setExportScope=setExportScope;
+
+  // INIT
+  onCellCapChange(); onSimplifyChange(); updateExportModeUI(); onExportResChange(); updatePolyList();
+  onParamChange(); renderWholeMapMetrics();
+  map.on('click',onMapClick);
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&isDrawing) finishDraw(); });
+  setPill('Ready','');
+  dbg('ok','H3 Polygon Generator initialised');
+}
+</script>
+</body>
+</html>
