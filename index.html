@@ -911,7 +911,6 @@ function setPill(msg, type, progress=null) {
 
 // ── CDN GUARD ─────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  getGeoPackageLib();
   const miss = [];
   if (typeof h3   === 'undefined') miss.push('h3-js');
   if (typeof turf === 'undefined') miss.push('turf');
@@ -922,7 +921,14 @@ window.addEventListener('DOMContentLoaded', () => {
       <b>CDN load failed: ${miss.join(', ')}</b><br>Open this file locally in Chrome or Firefox.</div>`;
     return;
   }
-  initApp();
+  try {
+    initApp();
+  } catch (e) {
+    console.error(e);
+    document.body.innerHTML = `<div style="font-family:sans-serif;color:#d05c5c;padding:40px;background:#0d0d0d;height:100vh;line-height:1.8;white-space:pre-wrap">
+      <b>App initialisation failed</b><br>${String(e && e.stack ? e.stack : e)}
+    </div>`;
+  }
 });
 
 // ── APP ───────────────────────────────────────────────────────────────────
@@ -1645,6 +1651,64 @@ function initApp() {
       populatePresetSelect();
       if (!silent) showStatus('No /polygons/manifest.json found yet', 'warn');
       dbg('warn', `Preset manifest not loaded: ${e.message}`);
+    }
+  }
+
+  async function importShapeFromArrayBuffer(buffer, sourceLabel, extHint='') {
+    let imported;
+    const ext = extHint.toLowerCase();
+
+    if (ext === 'json' || ext === 'geojson') {
+      imported = JSON.parse(new TextDecoder().decode(buffer));
+    } else if (ext === 'gpkg') {
+      const features = await readGeoPackageArrayBuffer(buffer, sourceLabel, '', (prog) => {
+        if (prog?.phase === 'table') {
+          const pct = prog.tableCount ? ((prog.tableIndex - 1) / prog.tableCount) * 100 : 0;
+          setPill(`Reading GeoPackage: ${prog.table} (${prog.rows.toLocaleString()} features)`, 'busy', pct);
+        }
+      });
+      imported = { type: 'FeatureCollection', features };
+    } else {
+      imported = await shp(buffer);
+    }
+
+    const features = normalizeImportedToPolygonFeatures(imported);
+    if (!features.length) throw new Error('No polygon features found');
+
+    let count = 0;
+    for (let i = 0; i < features.length; i++) {
+      addPolyObject(features[i], { source: sourceLabel, name: `${sourceLabel} · ${i + 1}` });
+      count++;
+      if (count % 10 === 0) showStatus(`Imported ${count}/${features.length} polygon(s)…`, 'busy', (count / features.length) * 100);
+      await yieldToUI();
+    }
+    if (currentPolyIndex == null && polys.length) selectSinglePoly(0);
+    updateExportAvailability();
+    return count;
+  }
+
+  async function handleRemoteShapeLoad(url, sourceLabel) {
+    const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    return importShapeFromArrayBuffer(buf, sourceLabel, ext);
+  }
+
+  async function loadSelectedPresetPolygon() {
+    const sel = document.getElementById('presetPolygonSelect');
+    const idx = parseInt(sel.value, 10);
+    if (Number.isNaN(idx) || !presetPolygons[idx]) {
+      showStatus('Choose a preset polygon first', 'warn');
+      return;
+    }
+    const preset = presetPolygons[idx];
+    showStatus(`Loading preset ${preset.name}…`, 'info');
+    try {
+      const count = await handleRemoteShapeLoad(preset.file, preset.name);
+      showStatus(`Loaded preset ${preset.name} (${count} polygon(s))`, 'ok');
+    } catch (e) {
+      showStatus(`Preset load failed: ${e.message}`, 'error');
     }
   }
 
