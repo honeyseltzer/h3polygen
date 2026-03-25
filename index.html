@@ -96,6 +96,33 @@ body {
 #status-pill.warn  { border-color:var(--amb); color:var(--amb); }
 #status-pill.error { border-color:var(--red); color:var(--red); }
 
+#hdr-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+#ready-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--line2);
+  border-radius: 999px;
+  overflow: hidden;
+  display: none;
+}
+#ready-progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--acc);
+  transition: width 140ms linear;
+}
+#ready-progress.busy #ready-progress-fill { background: var(--acc); }
+#ready-progress.info #ready-progress-fill { background: var(--blu); }
+#ready-progress.ok #ready-progress-fill { background: var(--grn); }
+#ready-progress.warn #ready-progress-fill { background: var(--amb); }
+#ready-progress.error #ready-progress-fill { background: var(--red); }
+
 /* ── TABS ────────────────────────────────────────────────────────────────── */
 #tab-bar {
   display: flex;
@@ -622,7 +649,10 @@ input[type=range]::-moz-range-thumb {
 
   <!-- Header -->
   <div id="hdr">
-    <div id="status-pill">Ready</div>
+    <div id="hdr-wrap">
+      <div id="status-pill">Ready</div>
+      <div id="ready-progress" aria-hidden="true"><div id="ready-progress-fill"></div></div>
+    </div>
   </div>
 
   <!-- Tab bar -->
@@ -717,7 +747,20 @@ input[type=range]::-moz-range-thumb {
         <div class="btn-row">
           <button class="btn" onclick="document.getElementById('shapeFile').click()">Import File</button>
         </div>
-        <input type="file" id="shapeFile" accept=".zip,.json,.geojson" style="display:none;" onchange="handleShapeUpload(event)"/>
+        <input type="file" id="shapeFile" accept=".zip,.json,.geojson,.gpkg" style="display:none;" onchange="handleShapeUpload(event)"/>
+      </div>
+
+      <div class="field-group">
+        <div class="field-group-label">This is a folder to polygons</div>
+        <div style="padding:12px;font-size:11px;line-height:1.75;color:var(--tx1);">
+          Preset files are loaded from
+          <a href="https://github.com/honeyseltzer/h3polygen/tree/main/polygons" target="_blank" rel="noreferrer" style="color:var(--acc);text-decoration:none;">/polygons</a>.
+          Add a <span style="font-family:var(--mono);color:var(--tx0);">manifest.json</span> file there listing preset
+          <span style="font-family:var(--mono);color:var(--tx0);">.zip</span>,
+          <span style="font-family:var(--mono);color:var(--tx0);">.geojson</span>, or
+          <span style="font-family:var(--mono);color:var(--tx0);">.gpkg</span> files.
+          GeoPackage entries can also specify a table/layer name.
+        </div>
       </div>
 
       <div class="field-group">
@@ -759,7 +802,7 @@ input[type=range]::-moz-range-thumb {
           <div class="sl-head"><span>Preset source folder</span><span class="sl-val" id="presetCountLabel">0</span></div>
           <div style="font-size:11px;line-height:1.7;color:var(--tx1);padding-top:2px;">
             This loads files from <a href="https://github.com/honeyseltzer/h3polygen/tree/main/polygons" target="_blank" rel="noreferrer" style="color:var(--acc);text-decoration:none;">/polygons</a>.
-            Add a <span style="font-family:var(--mono);color:var(--tx0);">manifest.json</span> file in that folder listing your preset <span style="font-family:var(--mono);color:var(--tx0);">.zip</span> shapefiles or GeoJSON files.
+            Add a <span style="font-family:var(--mono);color:var(--tx0);">manifest.json</span> file in that folder listing your preset <span style="font-family:var(--mono);color:var(--tx0);">.zip</span> shapefiles, GeoJSON files, or <span style="font-family:var(--mono);color:var(--tx0);">.gpkg</span> GeoPackages.
           </div>
         </div>
         <div class="sl-wrap" style="border-top:1px solid var(--line)">
@@ -820,6 +863,7 @@ input[type=range]::-moz-range-thumb {
 <script src="https://cdn.jsdelivr.net/npm/h3-js@4.1.0/dist/h3-js.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/shpjs@latest/dist/shp.js"></script>
+<script src="https://unpkg.com/@ngageoint/geopackage/dist/geopackage.min.js"></script>
 
 <script>
 // ── TAB SWITCHING ─────────────────────────────────────────────────────────
@@ -831,18 +875,43 @@ function switchTab(id, btn) {
 }
 
 // ── STATUS PILL ───────────────────────────────────────────────────────────
-function setPill(msg, type) {
+function setPill(msg, type, progress=null) {
   const p = document.getElementById('status-pill');
+  const bar = document.getElementById('ready-progress');
+  const fill = document.getElementById('ready-progress-fill');
   p.textContent = msg;
   p.className = type || '';
   clearTimeout(p._t);
+
+  const hasProgress = Number.isFinite(progress);
+  if (bar && fill) {
+    if (hasProgress) {
+      bar.style.display = 'block';
+      bar.className = type || '';
+      fill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+    } else {
+      bar.style.display = 'none';
+      bar.className = '';
+      fill.style.width = '0%';
+    }
+  }
+
   if (type === 'ok' || type === 'info') {
-    p._t = setTimeout(() => { p.textContent = 'Ready'; p.className = ''; }, 3500);
+    p._t = setTimeout(() => {
+      p.textContent = 'Ready';
+      p.className = '';
+      if (bar && fill) {
+        bar.style.display = 'none';
+        bar.className = '';
+        fill.style.width = '0%';
+      }
+    }, 3500);
   }
 }
 
 // ── CDN GUARD ─────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  getGeoPackageLib();
   const miss = [];
   if (typeof h3   === 'undefined') miss.push('h3-js');
   if (typeof turf === 'undefined') miss.push('turf');
@@ -905,11 +974,11 @@ function initApp() {
   let openDropdownIdx = null; // which poly dropdown is open
   let presetPolygons = [];
 
-  function showStatus(msg, type='') {
+  function showStatus(msg, type='', progress=null) {
     const el = document.getElementById('draw-notice');
     el.style.display = 'block';
     el.innerHTML = `<div class="notice ${type}" style="margin-top:4px;">${msg}</div>`;
-    setPill(msg, type);
+    setPill(msg, type, progress);
   }
   function setMode(mode) {
     drawMode = mode;
@@ -979,6 +1048,79 @@ function initApp() {
     }catch{}
     return poly;
   }
+
+  function getGeoPackageLib() {
+    const lib = window.GeoPackage;
+    if (lib?.setSqljsWasmLocateFile) {
+      try {
+        lib.setSqljsWasmLocateFile(file => `https://unpkg.com/@ngageoint/geopackage/dist/${file}`);
+      } catch {}
+    }
+    return lib || null;
+  }
+
+  function geoPackageFeatureToGeoJSON(featureRow, featureTable, info) {
+    if (!featureRow || !featureRow.geometry) return null;
+    const geom = featureRow.geometry.geometry || featureRow.geometry;
+    if (!geom) return null;
+    let geoJson = null;
+    try {
+      geoJson = typeof geom.toGeoJSON === 'function' ? geom.toGeoJSON() : (typeof featureRow.geometry.toGeoJSON === 'function' ? featureRow.geometry.toGeoJSON() : null);
+    } catch {}
+    if (!geoJson) return null;
+    geoJson.properties = geoJson.properties || {};
+    geoJson.properties.table_name = featureTable;
+    if (info?.columnMap && featureRow.values) {
+      for (const key in featureRow.values) {
+        if (Object.prototype.hasOwnProperty.call(featureRow.values, key) && key !== featureRow.geometryColumn?.name) {
+          const column = info.columnMap[key];
+          geoJson.properties[column?.displayName || key] = featureRow.values[key];
+        }
+      }
+    }
+    return geoJson;
+  }
+
+  async function readGeoPackageArrayBuffer(buffer, sourceLabel, tableFilter='', onProgress=null) {
+    const lib = getGeoPackageLib();
+    if (!lib?.GeoPackageAPI) throw new Error('GeoPackage library unavailable');
+    const geoPackage = await lib.GeoPackageAPI.open(new Uint8Array(buffer));
+    const tableNames = geoPackage.getFeatureTables();
+    if (!tableNames.length) {
+      try { geoPackage.close(); } catch {}
+      throw new Error('No feature tables found in GeoPackage');
+    }
+
+    const wantedTables = tableFilter ? tableNames.filter(t => t === tableFilter) : tableNames.slice();
+    if (!wantedTables.length) {
+      try { geoPackage.close(); } catch {}
+      throw new Error(`GeoPackage table not found: ${tableFilter}`);
+    }
+
+    const features = [];
+    let tableIdx = 0;
+    for (const tableName of wantedTables) {
+      tableIdx++;
+      const featureDao = geoPackage.getFeatureDao(tableName);
+      const info = geoPackage.getInfoForTable(featureDao);
+      const rows = featureDao.queryForEach();
+      let rowCount = 0;
+      for (const row of rows) {
+        const feature = featureDao.getRow(row);
+        const geoJson = geoPackageFeatureToGeoJSON(feature, tableName, info);
+        if (geoJson) features.push(geoJson);
+        rowCount++;
+        if (onProgress && rowCount % 50 === 0) onProgress({ phase: 'table', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: rowCount, total: features.length, sourceLabel });
+        if (rowCount % 100 === 0) await yieldToUI();
+      }
+      if (onProgress) onProgress({ phase: 'table-done', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: rowCount, total: features.length, sourceLabel });
+      await yieldToUI();
+    }
+
+    try { geoPackage.close(); } catch {}
+    return normalizeImportedToPolygonFeatures(features);
+  }
+
   function ringToLatLngCoords(boundary) {
     if(!boundary?.length) return [];
     const coords=boundary.map(p=>[p[1],p[0]]);
@@ -1153,16 +1295,27 @@ function initApp() {
     }catch(e){ return {err:'polyfill_failed',msg:e.message}; }
   }
 
-  function renderH3(poly,cells) {
+  async function renderH3(poly,cells,progressLabel='Rendering hexes') {
     clearLayer(poly.h3Layer);
-    const features=cells.map(cell=>{
-      const boundary=h3.cellToBoundary(cell);
-      const coords=ringToLatLngCoords(boundary);
-      return {type:'Feature',geometry:{type:'Polygon',coordinates:[coords]},properties:{resolution:h3.getResolution(cell)}};
-    });
-    poly.h3Layer=L.geoJSON({type:'FeatureCollection',features},{renderer,
+    poly.h3Layer = L.geoJSON(null, {
+      renderer,
       style:f=>{ const c=RES_COLORS[f.properties.resolution]||'#fff'; return {color:c,weight:0.6,fillColor:c,fillOpacity:0.25,opacity:0.75}; }
     }).addTo(map);
+
+    const CHUNK = 1500;
+    const total = cells.length;
+    for (let i = 0; i < total; i += CHUNK) {
+      const slice = cells.slice(i, i + CHUNK);
+      const features = slice.map(cell => {
+        const boundary = h3.cellToBoundary(cell);
+        const coords = ringToLatLngCoords(boundary);
+        return {type:'Feature',geometry:{type:'Polygon',coordinates:[coords]},properties:{resolution:h3.getResolution(cell)}};
+      });
+      poly.h3Layer.addData({ type: 'FeatureCollection', features });
+      const pct = total ? ((Math.min(i + CHUNK, total) / total) * 100) : 100;
+      showStatus(`${progressLabel} ${Math.min(i + CHUNK, total).toLocaleString()}/${total.toLocaleString()}`, 'busy', pct);
+      await yieldToUI();
+    }
     if(poly.drawnLayer) poly.drawnLayer.bringToFront();
   }
 
@@ -1325,7 +1478,7 @@ function initApp() {
     if(!exportable.length){ showStatus('Nothing to export','warn'); return; }
     const mode=document.getElementById('exportMode').value;
     const exportRes=parseInt(document.getElementById('exportResSlider').value,10);
-    exportBtn.disabled=true; showStatus('Preparing export…','info');
+    exportBtn.disabled=true; showStatus('Preparing export…','busy',0);
     try{
       const cellFeatures=[];
       for(const poly of exportable){
@@ -1336,7 +1489,7 @@ function initApp() {
           const est=estimateExpandedCellCount(cells,exportRes);
           if(!Number.isFinite(est)||est>500000) throw new Error(`Estimated cells too large: ${Math.ceil(est).toLocaleString()}`);
           cells=await expandCellsToResolution(cells,exportRes,(done,total,out)=>{
-            showStatus(`Expanding: ${done}/${total} → ${out.toLocaleString()} cells`,'info');
+            showStatus(`Expanding: ${done}/${total} → ${out.toLocaleString()} cells`,'busy', (done / Math.max(1, total)) * 100);
           });
         }
         for(let i=0;i<cells.length;i++){
@@ -1362,10 +1515,17 @@ function initApp() {
   }
 
   // HEX
-  function hexPolygonByIndex(idx,opts={}) {
+  async function hexPolygonByIndex(idx,opts={}) {
     const poly=polys[idx]; if(!poly) return false;
     const maxRes=opts.maxRes||parseInt(document.getElementById('resSlider').value,10);
-    const result=computeAtRes(poly.feature,maxRes);
+    poly.hexCache ||= new Map();
+    let result = poly.hexCache.get(maxRes) || null;
+    if (!result) {
+      showStatus(`Hexing ${poly.name} at res ${maxRes}…`, 'busy', 0);
+      await yieldToUI();
+      result = computeAtRes(poly.feature,maxRes);
+      if (!result.err) poly.hexCache.set(maxRes, result);
+    }
     poly.result=result;
     if(result.err){
       if(result.err==='too_many'){
@@ -1376,7 +1536,7 @@ function initApp() {
       return false;
     }
     poly.hexed=true;
-    renderH3(poly,result.cells);
+    await renderH3(poly,result.cells, `Rendering ${poly.name}`);
     renderMetrics(poly);
     renderBreakdown(poly);
     document.getElementById('btnAutoFit').disabled=false;
@@ -1385,12 +1545,18 @@ function initApp() {
     return true;
   }
 
-  function hexSelectedPolygons() {
+  async function hexSelectedPolygons() {
     const targets=currentTargets();
     if(!targets.length){ showStatus('Select at least one polygon','warn'); return; }
-    let success=0;
     const res=parseInt(document.getElementById('resSlider').value,10);
-    targets.forEach(idx=>{ if(hexPolygonByIndex(idx,{maxRes:res})) success++; });
+    let success=0, done=0;
+    showStatus(`Hexing ${targets.length} polygon(s)…`, 'busy', 0);
+    for (const idx of targets) {
+      if (await hexPolygonByIndex(idx,{maxRes:res})) success++;
+      done++;
+      showStatus(`Hexing ${done}/${targets.length} polygon(s)…`, 'busy', (done / targets.length) * 100);
+      await yieldToUI();
+    }
     showStatus(`Hexed ${success}/${targets.length} at res ${res}`, success?'ok':'warn');
   }
 
@@ -1428,12 +1594,12 @@ function initApp() {
     return items.map((item, idx) => {
       if (typeof item === 'string') {
         const file = item.trim();
-        const name = file.split('/').pop().replace(/\.(zip|json|geojson)$/i, '');
-        return { name, file, description: '' };
+        const name = file.split('/').pop().replace(/\.(zip|json|geojson|gpkg)$/i, '');
+        return { name, file, description: '', table: '' };
       }
       const file = (item?.file || item?.url || item?.path || '').trim();
-      const name = (item?.name || item?.label || file.split('/').pop().replace(/\.(zip|json|geojson)$/i, '') || `Preset ${idx + 1}`).trim();
-      return { name, file, description: item?.description || '' };
+      const name = (item?.name || item?.label || file.split('/').pop().replace(/\.(zip|json|geojson|gpkg)$/i, '') || `Preset ${idx + 1}`).trim();
+      return { name, file, description: item?.description || '', table: (item?.table || item?.layer || item?.featureTable || item?.layerName || '') };
     }).filter(x => x.file);
   }
 
@@ -1463,6 +1629,7 @@ function initApp() {
     const status = document.getElementById('presetStatusLabel');
     try {
       status.textContent = 'Loading…';
+      if (!silent) showStatus('Loading preset manifest…', 'busy', 0);
       const manifestUrl = `polygons/manifest.json?ts=${Date.now()}`;
       const res = await fetch(manifestUrl, { cache: 'no-store' });
       if (!res.ok) throw new Error(`manifest ${res.status}`);
@@ -1478,52 +1645,6 @@ function initApp() {
       populatePresetSelect();
       if (!silent) showStatus('No /polygons/manifest.json found yet', 'warn');
       dbg('warn', `Preset manifest not loaded: ${e.message}`);
-    }
-  }
-
-  async function importShapeFromArrayBuffer(buffer, sourceLabel, extHint='') {
-    let imported;
-    const ext = extHint.toLowerCase();
-    if (ext === 'json' || ext === 'geojson') {
-      imported = JSON.parse(new TextDecoder().decode(buffer));
-    } else {
-      imported = await shp(buffer);
-    }
-    const features = normalizeImportedToPolygonFeatures(imported);
-    if (!features.length) throw new Error('No polygon features found');
-    let count = 0;
-    for (let i = 0; i < features.length; i++) {
-      addPolyObject(features[i], { source: sourceLabel, name: `${sourceLabel} · ${i + 1}` });
-      count++;
-      await yieldToUI();
-    }
-    if (currentPolyIndex == null && polys.length) selectSinglePoly(0);
-    updateExportAvailability();
-    return count;
-  }
-
-  async function handleRemoteShapeLoad(url, sourceLabel) {
-    const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = await res.arrayBuffer();
-    return importShapeFromArrayBuffer(buf, sourceLabel, ext);
-  }
-
-  async function loadSelectedPresetPolygon() {
-    const sel = document.getElementById('presetPolygonSelect');
-    const idx = parseInt(sel.value, 10);
-    if (Number.isNaN(idx) || !presetPolygons[idx]) {
-      showStatus('Choose a preset polygon first', 'warn');
-      return;
-    }
-    const preset = presetPolygons[idx];
-    showStatus(`Loading preset ${preset.name}…`, 'info');
-    try {
-      const count = await handleRemoteShapeLoad(preset.file, preset.name);
-      showStatus(`Loaded preset ${preset.name} (${count} polygon(s))`, 'ok');
-    } catch (e) {
-      showStatus(`Preset load failed: ${e.message}`, 'error');
     }
   }
 
@@ -1613,7 +1734,7 @@ function initApp() {
     document.getElementById('resLabel').textContent=document.getElementById('resSlider').value;
     document.getElementById('errThreshLabel').textContent=parseFloat(document.getElementById('errThreshSlider').value).toFixed(2)+'%';
     if(currentPolyIndex!=null&&polys[currentPolyIndex]?.hexed&&selectedIndices().length<=1)
-      hexPolygonByIndex(currentPolyIndex,{maxRes:parseInt(document.getElementById('resSlider').value,10)});
+      void hexPolygonByIndex(currentPolyIndex,{maxRes:parseInt(document.getElementById('resSlider').value,10)});
   }
 
   async function autoFit() {
@@ -1621,9 +1742,9 @@ function initApp() {
     if(!targets.length) return;
     const thresh=parseFloat(document.getElementById('errThreshSlider').value);
     document.getElementById('btnAutoFit').disabled=true;
-    showStatus(`Auto-fitting ${targets.length} polygon(s)…`,'info');
+    showStatus(`Auto-fitting ${targets.length} polygon(s)…`,'busy',0);
     let success=0;
-    for(const idx of targets){
+    for(const [tIndex, idx] of targets.entries()){
       const poly=polys[idx]; let best=null;
       for(let res=3;res<=15;res++){
         const result=computeAtRes(poly.feature,res);
@@ -1632,14 +1753,21 @@ function initApp() {
         best=result;
         if(result.errorPct<=thresh){
           poly.hexed=true; poly.result=result;
-          renderH3(poly,result.cells); renderMetrics(poly); renderBreakdown(poly); success++; break;
+          poly.hexCache ||= new Map();
+          poly.hexCache.set(res, result);
+          await renderH3(poly,result.cells, `Rendering ${poly.name}`);
+          renderMetrics(poly); renderBreakdown(poly); success++; break;
         }
         await yieldToUI();
       }
       if(best&&best.errorPct>thresh){
         poly.hexed=true; poly.result=best;
-        renderH3(poly,best.cells); renderMetrics(poly); renderBreakdown(poly); success++;
+        poly.hexCache ||= new Map();
+        poly.hexCache.set(best.maxRes, best);
+        await renderH3(poly,best.cells, `Rendering ${poly.name}`);
+        renderMetrics(poly); renderBreakdown(poly); success++;
       }
+      showStatus(`Auto-fitting ${tIndex+1}/${targets.length} polygon(s)…`, 'busy', ((tIndex+1)/targets.length)*100);
       await yieldToUI();
     }
     updatePolyList(); updateExportAvailability();
