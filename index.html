@@ -559,6 +559,22 @@ input[type=range]::-moz-range-thumb {
 .notice.error { border-color: var(--red); color: var(--red); }
 
 #draw-notice { display:none; margin-top: 4px; }
+#draw-mini-status {
+  display:none;
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-family: var(--mono);
+  border: 1px solid var(--line2);
+  background: rgba(255,255,255,.02);
+  color: var(--tx2);
+  border-radius: 10px;
+  line-height: 1.45;
+}
+#draw-mini-status.info { border-color: var(--blu); color: var(--blu); }
+#draw-mini-status.ok { border-color: var(--grn); color: var(--grn); }
+#draw-mini-status.warn { border-color: var(--amb); color: var(--amb); }
+#draw-mini-status.error { border-color: var(--red); color: var(--red); }
 .field-group .notice { border-left-width: 0; border-top: 1px solid var(--line); }
 
 /* ── DEBUG ───────────────────────────────────────────────────────────────── */
@@ -679,6 +695,7 @@ input[type=range]::-moz-range-thumb {
           <button class="btn go"     id="btnDraw"    onclick="toggleDraw()">Start Drawing</button>
           <button class="btn danger"                 onclick="clearAll()">Clear All</button>
         </div>
+        <div id="draw-mini-status">Ready</div>
         <div id="draw-notice"></div>
       </div>
 
@@ -950,6 +967,17 @@ function initApp() {
   }
   window.clearDebug = () => { _dbg.length = 0; document.getElementById('debug-pane').innerHTML = ''; };
 
+  window.addEventListener('error', (ev) => {
+    const msg = ev?.error?.stack || ev?.error?.message || ev?.message || 'Unknown error';
+    dbg('err', msg);
+  });
+
+  window.addEventListener('unhandledrejection', (ev) => {
+    const reason = ev?.reason;
+    const msg = reason?.stack || reason?.message || String(reason || 'Unhandled promise rejection');
+    dbg('err', msg);
+  });
+
   // CONSTANTS
   const RES_COLORS = {
     3:'#e05050',4:'#e07a30',5:'#d4b030',6:'#68c068',7:'#50a0e0',
@@ -980,11 +1008,29 @@ function initApp() {
   let openDropdownIdx = null; // which poly dropdown is open
   let presetPolygons = [];
 
+  function shortStatusLabel(msg, type='') {
+    const base = String(msg || '').replace(/<[^>]*>/g, '').trim();
+    const limit = 72;
+    const trimmed = base.length > limit ? `${base.slice(0, limit - 1)}…` : base;
+    if (type === 'ok') return `success ✓ ${trimmed}`;
+    if (type === 'error') return `failed ✕ ${trimmed}`;
+    if (type === 'warn') return `warn ! ${trimmed}`;
+    if (type === 'busy') return `busy… ${trimmed}`;
+    return trimmed || 'Ready';
+  }
+
   function showStatus(msg, type='', progress=null) {
     const el = document.getElementById('draw-notice');
+    const mini = document.getElementById('draw-mini-status');
     el.style.display = 'block';
     el.innerHTML = `<div class="notice ${type}" style="margin-top:4px;">${msg}</div>`;
-    setPill(msg, type, progress);
+    if (mini) {
+      mini.style.display = 'block';
+      mini.className = type ? `notice ${type}` : '';
+      mini.textContent = shortStatusLabel(msg, type);
+    }
+    setPill(shortStatusLabel(msg, type), type, progress);
+    if (type === 'error' || type === 'warn') dbg(type === 'error' ? 'err' : 'warn', String(msg));
   }
   function setMode(mode) {
     drawMode = mode;
@@ -1025,16 +1071,51 @@ function initApp() {
     return pts;
   }
   function normalizeImportedToPolygonFeatures(input) {
-    const out=[];
-    const push=(feat)=>{
-      if(feat?.geometry?.type==='Polygon') out.push({type:'Feature',properties:{...feat.properties},geometry:{type:'Polygon',coordinates:feat.geometry.coordinates}});
-      else if(feat?.geometry?.type==='MultiPolygon') feat.geometry.coordinates.forEach((coords,i)=>out.push({type:'Feature',properties:{...feat.properties,__part:i+1},geometry:{type:'Polygon',coordinates:coords}}));
+    const out = [];
+
+    const pushPolygon = (coords, properties = {}, extra = {}) => {
+      if (!Array.isArray(coords) || !coords.length) return;
+      out.push({
+        type: 'Feature',
+        properties: { ...properties, ...extra },
+        geometry: { type: 'Polygon', coordinates: coords }
+      });
     };
-    if(Array.isArray(input)) input.forEach(i=>{ if(i?.type==='FeatureCollection') i.features.forEach(push); else if(i?.type==='Feature') push(i); });
-    else if(input?.type==='FeatureCollection') input.features.forEach(push);
-    else if(input?.type==='Feature') push(input);
+
+    const walk = (item, properties = {}) => {
+      if (!item) return;
+      if (Array.isArray(item)) {
+        item.forEach(v => walk(v, properties));
+        return;
+      }
+
+      if (item.type === 'FeatureCollection' && Array.isArray(item.features)) {
+        item.features.forEach(f => walk(f, properties));
+        return;
+      }
+
+      if (item.type === 'Feature') {
+        walk(item.geometry, item.properties || properties);
+        return;
+      }
+
+      const geom = item.geometry && !item.type ? item.geometry : item;
+      const type = geom?.type;
+      const props = geom?.properties || properties;
+
+      if (type === 'Polygon') {
+        pushPolygon(geom.coordinates, props);
+      } else if (type === 'MultiPolygon') {
+        geom.coordinates.forEach((coords, i) => pushPolygon(coords, props, { __part: i + 1 }));
+      } else if (type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+        geom.geometries.forEach(g => walk(g, props));
+      }
+    };
+
+    walk(input);
     return out;
   }
+
   function ensureClosedRing(ring) {
     if(!ring||ring.length<3) return ring;
     const first=ring[0],last=ring[ring.length-1];
@@ -1065,23 +1146,51 @@ function initApp() {
     return lib || null;
   }
 
-  function geoPackageFeatureToGeoJSON(featureRow, featureTable, info) {
-    if (!featureRow || !featureRow.geometry) return null;
-    const geom = featureRow.geometry.geometry || featureRow.geometry;
-    if (!geom) return null;
+  function featureRowToGeoJSON(featureRow, featureTable, info) {
+    if (!featureRow) return null;
     let geoJson = null;
+
+    const tryCandidates = [];
+    try { if (typeof featureRow.toGeoJSON === 'function') tryCandidates.push(() => featureRow.toGeoJSON()); } catch {}
+    try { if (typeof featureRow.getGeoJSON === 'function') tryCandidates.push(() => featureRow.getGeoJSON()); } catch {}
     try {
-      geoJson = typeof geom.toGeoJSON === 'function' ? geom.toGeoJSON() : (typeof featureRow.geometry.toGeoJSON === 'function' ? featureRow.geometry.toGeoJSON() : null);
+      if (featureRow.geometry?.geometry && typeof featureRow.geometry.geometry.toGeoJSON === 'function') {
+        tryCandidates.push(() => featureRow.geometry.geometry.toGeoJSON());
+      }
     } catch {}
+    try {
+      if (featureRow.geometry && typeof featureRow.geometry.toGeoJSON === 'function') {
+        tryCandidates.push(() => featureRow.geometry.toGeoJSON());
+      }
+    } catch {}
+
+    for (const fn of tryCandidates) {
+      try {
+        const candidate = fn();
+        if (candidate) { geoJson = candidate; break; }
+      } catch {}
+    }
+
     if (!geoJson) return null;
+    if (geoJson.type !== 'Feature') {
+      if (geoJson.type && geoJson.coordinates) {
+        geoJson = { type: 'Feature', properties: {}, geometry: geoJson };
+      } else if (geoJson.geometry) {
+        geoJson = { type: 'Feature', properties: geoJson.properties || {}, geometry: geoJson.geometry };
+      } else {
+        return null;
+      }
+    }
+
     geoJson.properties = geoJson.properties || {};
     geoJson.properties.table_name = featureTable;
+
     if (info?.columnMap && featureRow.values) {
       for (const key in featureRow.values) {
-        if (Object.prototype.hasOwnProperty.call(featureRow.values, key) && key !== featureRow.geometryColumn?.name) {
-          const column = info.columnMap[key];
-          geoJson.properties[column?.displayName || key] = featureRow.values[key];
-        }
+        if (!Object.prototype.hasOwnProperty.call(featureRow.values, key)) continue;
+        if (key === featureRow.geometryColumn?.name) continue;
+        const column = info.columnMap[key];
+        geoJson.properties[column?.displayName || key] = featureRow.values[key];
       }
     }
     return geoJson;
@@ -1107,19 +1216,49 @@ function initApp() {
     let tableIdx = 0;
     for (const tableName of wantedTables) {
       tableIdx++;
+      let tableRows = 0;
       const featureDao = geoPackage.getFeatureDao(tableName);
       const info = geoPackage.getInfoForTable(featureDao);
-      const rows = featureDao.queryForEach();
-      let rowCount = 0;
-      for (const row of rows) {
-        const feature = featureDao.getRow(row);
-        const geoJson = geoPackageFeatureToGeoJSON(feature, tableName, info);
-        if (geoJson) features.push(geoJson);
-        rowCount++;
-        if (onProgress && rowCount % 50 === 0) onProgress({ phase: 'table', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: rowCount, total: features.length, sourceLabel });
-        if (rowCount % 100 === 0) await yieldToUI();
+
+      let geoJsonRows = null;
+      try {
+        if (typeof geoPackage.queryForGeoJSONFeatures === 'function') {
+          geoJsonRows = geoPackage.queryForGeoJSONFeatures(tableName);
+        }
+      } catch (e) {
+        dbg('warn', `queryForGeoJSONFeatures failed for ${tableName}: ${e.message}`);
       }
-      if (onProgress) onProgress({ phase: 'table-done', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: rowCount, total: features.length, sourceLabel });
+
+      if (geoJsonRows && typeof geoJsonRows[Symbol.iterator] === 'function') {
+        for (const row of geoJsonRows) {
+          let feat = row;
+          if (feat && feat.type === 'FeatureCollection' && Array.isArray(feat.features)) {
+            for (const f of feat.features) if (f) features.push(f);
+          } else if (feat) {
+            if (feat.type !== 'Feature' && feat.geometry) feat = { type: 'Feature', properties: feat.properties || {}, geometry: feat.geometry };
+            if (feat?.type === 'Feature') features.push(feat);
+          }
+          tableRows++;
+          if (tableRows % 100 === 0) {
+            onProgress?.({ phase: 'table', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: tableRows, total: features.length, sourceLabel });
+            await yieldToUI();
+          }
+        }
+      } else {
+        const rows = featureDao.queryForEach();
+        for (const row of rows) {
+          const feature = featureDao.getRow(row);
+          const geoJson = featureRowToGeoJSON(feature, tableName, info);
+          if (geoJson) features.push(geoJson);
+          tableRows++;
+          if (tableRows % 100 === 0) {
+            onProgress?.({ phase: 'table', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: tableRows, total: features.length, sourceLabel });
+            await yieldToUI();
+          }
+        }
+      }
+
+      onProgress?.({ phase: 'table-done', table: tableName, tableIndex: tableIdx, tableCount: wantedTables.length, rows: tableRows, total: features.length, sourceLabel });
       await yieldToUI();
     }
 
@@ -1642,6 +1781,7 @@ function initApp() {
       const manifest = await res.json();
       presetPolygons = normalizePresetManifest(manifest).map(p => ({
         ...p,
+        table: p.table || p.layer || '',
         file: p.file.startsWith('http') ? p.file : `polygons/${p.file.replace(/^\.\//, '')}`
       }));
       populatePresetSelect();
@@ -1654,17 +1794,27 @@ function initApp() {
     }
   }
 
-  async function importShapeFromArrayBuffer(buffer, sourceLabel, extHint='') {
+  async function importShapeFromArrayBuffer(buffer, sourceLabel, extHint='', tableFilter='') {
     let imported;
     const ext = extHint.toLowerCase();
 
     if (ext === 'json' || ext === 'geojson') {
       imported = JSON.parse(new TextDecoder().decode(buffer));
     } else if (ext === 'gpkg') {
-      const features = await readGeoPackageArrayBuffer(buffer, sourceLabel, '', (prog) => {
+      const features = await readGeoPackageArrayBuffer(buffer, sourceLabel, tableFilter, (prog) => {
         if (prog?.phase === 'table') {
-          const pct = prog.tableCount ? ((prog.tableIndex - 1) / prog.tableCount) * 100 : 0;
-          setPill(`Reading GeoPackage: ${prog.table} (${prog.rows.toLocaleString()} features)`, 'busy', pct);
+          const pct = prog.tableCount ? (((prog.tableIndex - 1) / prog.tableCount) * 100) : 0;
+          const tableMsg = `Reading GeoPackage: ${prog.table} (${prog.rows.toLocaleString()} features)`;
+          setPill(tableMsg, 'busy', pct);
+          const mini = document.getElementById('draw-mini-status');
+          if (mini) {
+            mini.style.display = 'block';
+            mini.className = 'notice busy';
+            mini.textContent = shortStatusLabel(tableMsg, 'busy');
+          }
+          dbg('info', tableMsg);
+        } else if (prog?.phase === 'table-done') {
+          dbg('ok', `Finished table ${prog.table} (${prog.rows.toLocaleString()} rows, ${prog.total.toLocaleString()} geometries)`);
         }
       });
       imported = { type: 'FeatureCollection', features };
@@ -1673,7 +1823,10 @@ function initApp() {
     }
 
     const features = normalizeImportedToPolygonFeatures(imported);
-    if (!features.length) throw new Error('No polygon features found');
+    if (!features.length) {
+      dbg('warn', `No polygon geometries found in ${sourceLabel} after normalization`);
+      throw new Error('No polygon features found');
+    }
 
     let count = 0;
     for (let i = 0; i < features.length; i++) {
@@ -1687,12 +1840,12 @@ function initApp() {
     return count;
   }
 
-  async function handleRemoteShapeLoad(url, sourceLabel) {
+  async function handleRemoteShapeLoad(url, sourceLabel, tableFilter='') {
     const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = await res.arrayBuffer();
-    return importShapeFromArrayBuffer(buf, sourceLabel, ext);
+    return importShapeFromArrayBuffer(buf, sourceLabel, ext, tableFilter);
   }
 
   async function loadSelectedPresetPolygon() {
@@ -1703,11 +1856,14 @@ function initApp() {
       return;
     }
     const preset = presetPolygons[idx];
-    showStatus(`Loading preset ${preset.name}…`, 'info');
+    showStatus(`Loading preset ${preset.name}…`, 'busy', 0);
     try {
-      const count = await handleRemoteShapeLoad(preset.file, preset.name);
+      const count = await handleRemoteShapeLoad(preset.file, preset.name, preset.table || '');
       showStatus(`Loaded preset ${preset.name} (${count} polygon(s))`, 'ok');
+      dbg('ok', `Preset loaded: ${preset.name} from ${preset.file}${preset.table ? ` [table=${preset.table}]` : ''}`);
     } catch (e) {
+      console.error(e);
+      dbg('err', `Preset load failed for ${preset.name}: ${e.stack || e.message || e}`);
       showStatus(`Preset load failed: ${e.message}`, 'error');
     }
   }
@@ -1715,12 +1871,16 @@ function initApp() {
   // IMPORT
   async function handleShapeUpload(ev) {
     const file=ev.target.files?.[0]; ev.target.value=''; if(!file) return;
-    showStatus(`Loading ${file.name}…`,'info');
+    showStatus(`Loading ${file.name}…`,'busy',0);
     try{
       const ext=(file.name.split('.').pop()||'').toLowerCase();
       const count = await importShapeFromArrayBuffer(await file.arrayBuffer(), file.name.replace(/\.[^.]+$/, ''), ext);
       showStatus(`Imported ${count} polygon(s)`,'ok');
-    }catch(e){ showStatus(`Import failed: ${e.message}`,'error'); }
+    }catch(e){
+      console.error(e);
+      dbg('err', `Import failed for ${file.name}: ${e.stack || e.message || e}`);
+      showStatus(`Import failed: ${e.message}`,'error');
+    }
   }
 
   // DRAW
@@ -1738,6 +1898,8 @@ function initApp() {
     isDrawing=true; currentShape=[];
     const btn=document.getElementById('btnDraw');
     btn.textContent='Stop Drawing'; btn.classList.remove('go'); btn.classList.add('active');
+    const mini = document.getElementById('draw-mini-status');
+    if (mini) { mini.style.display = 'block'; mini.className = 'notice info'; mini.textContent = 'success ✓ drawing armed'; }
     document.getElementById('cursor-hint').style.display='block';
     document.getElementById('map').classList.add('draw-active');
     showStatus(drawMode==='point'?'Click to place vertices. Double-click to close.':'Click and drag to draw.','info');
@@ -1755,6 +1917,8 @@ function initApp() {
     btn.textContent='Start Drawing'; btn.classList.remove('active'); btn.classList.add('go');
     document.getElementById('cursor-hint').style.display='none';
     document.getElementById('map').classList.remove('draw-active');
+    const mini = document.getElementById('draw-mini-status');
+    if (mini) { mini.textContent = 'Ready'; mini.className = ''; }
     document.getElementById('draw-notice').style.display='none';
     map.dragging.enable();
     if(currentShape.length>=3) addManualPolygon(currentShape.slice());
