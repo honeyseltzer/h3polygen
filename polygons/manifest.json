@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Qatar Gasfield",
+    "file": "qatar_gasfield.zip",
+    "description": "Example shapefile archive"
+  },
+  {
+    "name": "South Caspian Area",
+    "file": "south_caspian.geojson",
+    "description": "Example GeoJSON preset"
+  }
+]
